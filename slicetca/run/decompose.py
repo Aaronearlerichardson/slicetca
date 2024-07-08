@@ -58,7 +58,9 @@ def decompose(data: Union[torch.Tensor, np.array],
     dimensions = list(data.shape)
 
     if isinstance(number_components, int): decomposition = TCA
-    else: decomposition = SliceTCA
+    else:
+        if len(number_components) == 1: decomposition = TCA
+        else: decomposition = SliceTCA
 
     model = decomposition(dimensions, number_components, positive, initialization, device=data.device)
 
