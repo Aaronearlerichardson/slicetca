@@ -50,7 +50,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     if isinstance(data, np.ndarray): data = torch.tensor(data, device='cuda' if torch.cuda.is_available() else 'cpu')
 
     if data.dtype != torch.long:
-        loss_function = squared_difference
+        loss_function = torch.nn.MSELoss(reduction='none')
     else:
         spikes_factorial = torch.tensor(scipy.special.factorial(data.numpy(force=True)), device=data.device)
         loss_function = partial(poisson_log_likelihood, spikes_factorial=spikes_factorial)
@@ -58,9 +58,8 @@ def decompose(data: Union[torch.Tensor, np.array],
     dimensions = list(data.shape)
 
     if isinstance(number_components, int): decomposition = TCA
-    else:
-        if len(number_components) == 1: decomposition = TCA
-        else: decomposition = SliceTCA
+    elif len(number_components) == 1: decomposition = TCA
+    else: decomposition = SliceTCA
 
     model = decomposition(dimensions, number_components, positive, initialization, device=data.device)
 
