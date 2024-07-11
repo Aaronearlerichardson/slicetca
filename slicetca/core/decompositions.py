@@ -6,8 +6,6 @@ from collections.abc import Iterable
 
 from typing import Sequence, Union, Callable
 
-from slicetca.core.helper_functions import binary_mask_generator
-
 
 class PartitionTCA(nn.Module):
 
