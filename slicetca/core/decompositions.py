@@ -6,6 +6,8 @@ from collections.abc import Iterable
 
 from typing import Sequence, Union, Callable
 
+from slicetca.core.helper_functions import binary_mask_generator
+
 
 class PartitionTCA(nn.Module):
 
@@ -140,7 +142,7 @@ class PartitionTCA(nn.Module):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions, dtype=self.dtype).to(self.device)
+        temp = torch.zeros(self.dimensions, dtype=self.dtype, device=self.device)
         for j in range(self.ranks[partition]):
             temp += self.construct_single_component(partition, j)
 
@@ -152,7 +154,7 @@ class PartitionTCA(nn.Module):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions, dtype=self.dtype).to(self.device)
+        temp = torch.zeros(self.dimensions, dtype=self.dtype, device=self.device)
 
         for i in range(len(self.partitions)):
             for j in range(self.ranks[i]):
@@ -169,7 +171,7 @@ class PartitionTCA(nn.Module):
         :return: list of list of tensors.
         """
 
-        temp = [[] for i in range(len(self.vectors))]
+        temp = [[] for _ in range(len(self.vectors))]
 
         for i in range(len(self.vectors)):
             for j in range(len(self.vectors[i])):
@@ -227,9 +229,12 @@ class PartitionTCA(nn.Module):
 
         losses = []
         data = X.to(self.device)
-        if mask is not None: data[~mask] = 0.0
-        total_entries = torch.sum(mask).item()
-        batch_entries = int(batch_prop * total_entries)
+        if mask is not None:
+            data[~mask] = 0.0
+            total_entries = torch.sum(mask).item()
+        else:
+            total_entries = self.entries
+        batch_entries = batch_prop * total_entries
 
         iterator = tqdm.tqdm(range(max_iter)) if progress_bar else range(max_iter)
 
@@ -242,7 +247,7 @@ class PartitionTCA(nn.Module):
                                    ) / total_entries
 
             if batch_prop != 1.0: batch_mask = torch.rand(
-                self.dimensions, device=self.device) < batch_prop
+                self.dimensions, device=self.device, dtype=torch.half) < batch_prop
 
             if mask is None and batch_prop == 1.0:
                 loss = total_loss
@@ -258,7 +263,7 @@ class PartitionTCA(nn.Module):
                                  ) / batch_entries
 
             optimizer.zero_grad()
-            loss.float().backward()
+            loss.backward()
             optimizer.step()
 
             total_loss = total_loss.item()
@@ -283,7 +288,8 @@ class SliceTCA(PartitionTCA):
                  initialization: str = 'uniform',
                  init_weight: float = None,
                  init_bias: float = None,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 dtype: torch.dtype = torch.float64):
         """
         Main sliceTCA decomposition class.
 
@@ -301,8 +307,15 @@ class SliceTCA(PartitionTCA):
         valence = len(dimensions)
         partitions = [[[i], [j for j in range(valence) if j != i]] for i in range(valence)]
 
-        super().__init__(dimensions=dimensions, ranks=ranks, partitions=partitions, positive=positive,
-                         initialization=initialization, init_weight=init_weight, init_bias=init_bias, device=device)
+        super().__init__(dimensions=dimensions,
+                         ranks=ranks,
+                         partitions=partitions,
+                         positive=positive,
+                         initialization=initialization,
+                         init_weight=init_weight,
+                         init_bias=init_bias,
+                         device=device,
+                         dtype=dtype)
 
 
 class TCA(PartitionTCA):
@@ -313,7 +326,8 @@ class TCA(PartitionTCA):
                  initialization: str = 'uniform',
                  init_weight: float = None,
                  init_bias: float = None,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 dtype: torch.dtype = torch.float64):
         """
         Main TCA decomposition class.
 
@@ -334,5 +348,12 @@ class TCA(PartitionTCA):
         valence = len(dimensions)
         partitions = [[[j] for j in range(valence)]]
 
-        super().__init__(dimensions=dimensions, ranks=rank, partitions=partitions, positive=positive,
-                         initialization=initialization, init_weight=init_weight, init_bias=init_bias, device=device)
+        super().__init__(dimensions=dimensions,
+                         ranks=rank,
+                         partitions=partitions,
+                         positive=positive,
+                         initialization=initialization,
+                         init_weight=init_weight,
+                         init_bias=init_bias,
+                         device=device,
+                         dtype=dtype)

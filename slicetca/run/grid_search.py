@@ -116,8 +116,10 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
                              seed=seed, **kwargs)
         data_hat = model.construct()
 
-    if mask_test is None: loss = torch.mean((data-data_hat)**2).item()
-    else: loss = torch.mean(((data-data_hat)[mask_test])**2).item()
+    loss_function = kwargs.get('loss_function', torch.nn.MSELoss(reduction='none'))
+
+    if mask_test is not None: data=data[mask_test]; data_hat=data_hat[mask_test]
+    loss = torch.mean(loss_function(data, data_hat)).item()
 
     return loss
 

@@ -22,7 +22,8 @@ def decompose(data: Union[torch.Tensor, np.array],
               progress_bar: bool = True,
               seed: int = 7,
               weight_decay: float = None,
-              batch_prop_decay: int = 1):
+              batch_prop_decay: int = 1,
+              loss_function: callable = None):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -47,13 +48,17 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     torch.manual_seed(seed)
 
-    if isinstance(data, np.ndarray): data = torch.tensor(data, device='cuda' if torch.cuda.is_available() else 'cpu')
+    if isinstance(data, np.ndarray): data = torch.tensor(
+        data, device='cuda' if torch.cuda.is_available() else 'cpu')
 
-    if data.dtype != torch.long:
-        loss_function = torch.nn.MSELoss(reduction='none')
-    else:
-        spikes_factorial = torch.tensor(scipy.special.factorial(data.numpy(force=True)), device=data.device)
-        loss_function = partial(poisson_log_likelihood, spikes_factorial=spikes_factorial)
+    if loss_function is None:
+        if data.dtype != torch.long:
+            loss_function = torch.nn.MSELoss(reduction='none')
+        else:
+            spikes_factorial = torch.tensor(scipy.special.factorial(
+                data.numpy(force=True)), device=data.device)
+            loss_function = partial(poisson_log_likelihood,
+                                    spikes_factorial=spikes_factorial)
 
     dimensions = list(data.shape)
 
@@ -61,13 +66,16 @@ def decompose(data: Union[torch.Tensor, np.array],
     elif len(number_components) == 1: decomposition = TCA
     else: decomposition = SliceTCA
 
-    model = decomposition(dimensions, number_components, positive, initialization, device=data.device)
+    model = decomposition(dimensions, number_components, positive,
+                          initialization, device=data.device, dtype=data.dtype)
 
-    if weight_decay is None: optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    else: optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    if weight_decay is None:
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    else: optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate,
+                                        weight_decay=weight_decay)
 
     for i in range(1,batch_prop_decay+1):
-        model.fit(data, optimizer, loss_function,
-                  1-(1-batch_prop)**i, max_iter, min_std, iter_std, mask, verbose, progress_bar)
+        model.fit(data, optimizer, loss_function, 1-(1-batch_prop)**i,
+                  max_iter, min_std, iter_std, mask, verbose, progress_bar)
 
     return model.get_components(numpy=True), model
