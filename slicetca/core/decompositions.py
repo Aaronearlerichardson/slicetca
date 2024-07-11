@@ -17,7 +17,8 @@ class PartitionTCA(nn.Module):
                  initialization: str = 'uniform',
                  init_weight: float = None,
                  init_bias: float = None,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 dtype: torch.dtype = torch.float64):
         """
         Parent class for the sliceTCA and TCA decompositions.
 
@@ -51,17 +52,18 @@ class PartitionTCA(nn.Module):
 
         vectors = nn.ModuleList([])
 
+        init_params = dict(device=device, dtype=dtype)
         for i in range(len(ranks)):
             r = ranks[i]
             dim = components[i]
 
             # k-tensors of the outer product
             if initialization == 'normal':
-                v = [nn.Parameter(positive_function[i][j](torch.randn([r]+d, device=device)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function[i][j](torch.randn([r]+d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform':
-                v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, device=device)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
-                v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, device=device)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -77,6 +79,7 @@ class PartitionTCA(nn.Module):
         self.init_weight = init_weight
         self.init_bias = init_bias
         self.device = device
+        self.dtype = dtype
 
         self.components = components
         self.positive_function = positive_function
@@ -137,7 +140,7 @@ class PartitionTCA(nn.Module):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions).to(self.device)
+        temp = torch.zeros(self.dimensions, dtype=self.dtype).to(self.device)
         for j in range(self.ranks[partition]):
             temp += self.construct_single_component(partition, j)
 
@@ -149,7 +152,7 @@ class PartitionTCA(nn.Module):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions).to(self.device)
+        temp = torch.zeros(self.dimensions, dtype=self.dtype).to(self.device)
 
         for i in range(len(self.partitions)):
             for j in range(self.ranks[i]):
@@ -235,9 +238,11 @@ class PartitionTCA(nn.Module):
             X_hat = self.construct()
 
             loss_entries = loss_function(data, X_hat)
-            total_loss = torch.sum(torch.where(mask, loss_entries, 0.)) / total_entries
+            total_loss = torch.sum(torch.where(mask, loss_entries, 0.)
+                                   ) / total_entries
 
-            if batch_prop != 1.0: batch_mask = torch.rand(self.dimensions, device=self.device) < batch_prop
+            if batch_prop != 1.0: batch_mask = torch.rand(
+                self.dimensions, device=self.device) < batch_prop
 
             if mask is None and batch_prop == 1.0:
                 loss = total_loss
@@ -249,10 +254,11 @@ class PartitionTCA(nn.Module):
                 else:
                     total_mask = mask & batch_mask
 
-                loss = torch.sum(torch.where(total_mask, loss_entries, 0.)) / batch_entries
+                loss = torch.sum(torch.where(total_mask, loss_entries, 0.)
+                                 ) / batch_entries
 
             optimizer.zero_grad()
-            loss.backward()
+            loss.float().backward()
             optimizer.step()
 
             total_loss = total_loss.item()
