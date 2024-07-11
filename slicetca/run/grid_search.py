@@ -59,15 +59,19 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
 
     dec = partial(decompose_mp_sample, data=data, mask_train=mask_train, mask_test=mask_test, sample_size=sample_size,
                   processes_sample=processes_sample, **kwargs)
-
     out_grid = []
-    with Pool(max_workers=processes_grid) as pool:
-        iterator = tqdm(pool.map(dec, grid), total=torch.tensor(grid).size()[0])
-        iterator.set_description('Number of components (completed): - ', refresh=True)
-        for i, p in enumerate(iterator):
-            out_grid.append(p)
-            iterator.set_description('Number of components (completed): '+str(np.unravel_index(i, tuple(max_ranks))) + ' ', refresh=True)
-    out_grid = np.array(out_grid, dtype=np.float32)
+    if processes_grid == 1:
+        for i in tqdm(range(torch.tensor(grid).size()[0]), desc='Number of components (completed): - '):
+            out_grid.append(dec(grid[i]))
+    else:
+        with Pool(max_workers=processes_grid) as pool:
+            iterator = tqdm(pool.map(dec, grid), total=torch.tensor(grid).size()[0])
+            iterator.set_description('Number of components (completed): - ', refresh=True)
+            for i, p in enumerate(iterator):
+                out_grid.append(p)
+                iterator.set_description('Number of components (completed): '+str(np.unravel_index(i, tuple(max_ranks))) + ' ', refresh=True)
+
+    out_grid = np.array(out_grid, dtype=np.float64)
 
     loss_grid = out_grid[:,0]
     seed_grid = out_grid[:,1].astype(int)
@@ -96,8 +100,8 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
 
     sample = np.concatenate([sample, seeds[:,np.newaxis]], axis=-1)
 
-    with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
-
+    # with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
+    loss = np.array([dec(s) for s in sample])
     return loss, seeds
 
 
