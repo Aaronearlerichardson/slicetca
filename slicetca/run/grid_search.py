@@ -99,10 +99,15 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
     seeds = np.random.randint(10**2,10**6, sample_size)
 
     sample = np.concatenate([sample, seeds[:,np.newaxis]], axis=-1)
+    if processes_sample == 1:
+        loss = np.array([dec(s) for s in sample])
+    else:
+        with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
 
-    with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
-    # loss = np.array([dec(s) for s in sample])
     return loss, seeds
+
+def mse(x, y, mask):
+    return (x.values() - torch.masked_select(y, mask)) ** 2
 
 
 def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **kwargs):
@@ -118,7 +123,12 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
 
     loss_function = kwargs.get('loss_function', torch.nn.MSELoss(reduction='none'))
 
-    if mask_test is not None: data=data[mask_test]; data_hat=data_hat[mask_test]
+    if mask_test is not None and data.is_sparse:
+        loss_function = partial(mse, mask=mask_test)
+        data = torch.sparse_coo_tensor(mask_test.nonzero().t(), data.to_dense()[mask_test]).coalesce()
+    elif mask_test is not None:
+        loss_function = partial(mse, mask=mask_test)
+        data = data[mask_test]
     loss = torch.mean(loss_function(data, data_hat)).item()
 
     return loss
