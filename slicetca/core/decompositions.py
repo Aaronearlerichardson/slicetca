@@ -231,6 +231,7 @@ class PartitionTCA(nn.Module):
             new_mask[tuple(X.indices())] = True
             new_mask = new_mask & mask
             X = torch.sparse_coo_tensor(new_mask.nonzero().t(), X.to_dense()[new_mask], X.shape, device=self.device)
+            X.coalesce()
             total_entries = torch.sum(new_mask).item()
         elif mask is not None:
             X = X.to(self.device)
