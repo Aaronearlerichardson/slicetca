@@ -100,8 +100,8 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
 
     sample = np.concatenate([sample, seeds[:,np.newaxis]], axis=-1)
 
-    # with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
-    loss = np.array([dec(s) for s in sample])
+    with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
+    # loss = np.array([dec(s) for s in sample])
     return loss, seeds
 
 

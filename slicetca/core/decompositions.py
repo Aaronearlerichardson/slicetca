@@ -226,26 +226,40 @@ class PartitionTCA(nn.Module):
         """
 
         losses = []
-        data = X.to(self.device)
-        if mask is not None:
-            data[~mask] = 0.0
+        if mask is not None and X.is_sparse:
+            new_mask = torch.zeros_like(mask)
+            new_mask[tuple(X.indices())] = True
+            new_mask = new_mask & mask
+            X = torch.sparse_coo_tensor(new_mask.nonzero().t(), X.to_dense()[new_mask], X.shape, device=self.device)
+            total_entries = torch.sum(new_mask).item()
+        elif mask is not None:
+            X = X.to(self.device)
+            X[~mask] = 0.0
             total_entries = torch.sum(mask).item()
+        elif X.is_sparse:
+            total_entries = X._nnz()
         else:
             total_entries = self.entries
         batch_entries = batch_prop * total_entries
 
         iterator = tqdm.tqdm(range(max_iter)) if progress_bar else range(max_iter)
+        #
+        # if batch_prop != 1.0:
+        #     uni = torch.empty(self.dimensions, device=self.device, dtype=torch.half)
 
         for iteration in iterator:
 
             X_hat = self.construct()
 
-            loss_entries = loss_function(data, X_hat)
-            total_loss = torch.sum(torch.where(mask, loss_entries, 0.)
-                                   ) / total_entries
+            loss_entries = loss_function(X, X_hat)
+            if mask is not None:
+                entries = loss_entries * mask
+            else:
+                entries = loss_entries
+            total_loss = torch.sum(entries) / total_entries
 
             if batch_prop != 1.0: batch_mask = torch.rand(
-                self.dimensions, device=self.device, dtype=torch.half) < batch_prop
+                loss_entries.shape, device=self.device, dtype=torch.half) < batch_prop
 
             if mask is None and batch_prop == 1.0:
                 loss = total_loss
@@ -257,8 +271,7 @@ class PartitionTCA(nn.Module):
                 else:
                     total_mask = mask & batch_mask
 
-                loss = torch.sum(torch.where(total_mask, loss_entries, 0.)
-                                 ) / batch_entries
+                loss = torch.sum(loss_entries * total_mask) / batch_entries
 
             optimizer.zero_grad()
             loss.backward()
