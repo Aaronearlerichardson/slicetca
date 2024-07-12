@@ -230,9 +230,11 @@ class PartitionTCA(nn.Module):
             new_mask = torch.zeros_like(mask)
             new_mask[tuple(X.indices())] = True
             new_mask = new_mask & mask
-            X = torch.sparse_coo_tensor(new_mask.nonzero().t(), X.to_dense()[new_mask], X.shape, device=self.device)
-            X.coalesce()
-            total_entries = torch.sum(new_mask).item()
+            X = torch.sparse_coo_tensor(new_mask.nonzero().t(),
+                                        X.to_dense()[new_mask], X.shape,
+                                        device=self.device).coalesce()
+            mask = None
+            total_entries = X._nnz()
         elif mask is not None:
             X = X.to(self.device)
             X[~mask] = 0.0
