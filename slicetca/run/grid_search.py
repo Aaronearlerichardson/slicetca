@@ -107,7 +107,7 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
     return loss, seeds
 
 def mse(x, y, mask):
-    return (x.values() - torch.masked_select(y, mask)) ** 2
+    return (x - torch.masked_select(y, mask)) ** 2
 
 
 def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **kwargs):
@@ -117,15 +117,16 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
     if (number_components == np.zeros_like(number_components)).all():
         data_hat = 0
     else:
+        loss_function = kwargs.get('loss_function', partial(mse, mask=mask_train))
         _, model = decompose(data, number_components, mask=mask_train, verbose=False, progress_bar=False, *args,
-                             seed=seed, **kwargs)
+                             seed=seed,loss_function=loss_function, **kwargs)
         data_hat = model.construct()
 
     loss_function = kwargs.get('loss_function', torch.nn.MSELoss(reduction='none'))
 
     if mask_test is not None and data.is_sparse:
         loss_function = partial(mse, mask=mask_test)
-        data = torch.sparse_coo_tensor(mask_test.nonzero().t(), data.to_dense()[mask_test]).coalesce()
+        data = data.to_dense()[mask_test]
     elif mask_test is not None:
         loss_function = partial(mse, mask=mask_test)
         data = data[mask_test]

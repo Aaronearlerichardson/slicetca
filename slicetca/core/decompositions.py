@@ -236,9 +236,10 @@ class PartitionTCA(nn.Module):
             mask = None
             total_entries = X._nnz()
         elif mask is not None:
-            X = X.to(self.device)
-            X[~mask] = 0.0
+            X = X[mask]
+            # X[~mask] = 0.0
             total_entries = torch.sum(mask).item()
+            mask=None
         elif X.is_sparse:
             total_entries = X._nnz()
         else:
