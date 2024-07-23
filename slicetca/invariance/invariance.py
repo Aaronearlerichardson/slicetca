@@ -4,7 +4,8 @@ from slicetca.invariance.criteria import *
 from slicetca.core.decompositions import SliceTCA
 
 dict_L2_invariance_objectives = {'regularization': l2}
-dict_L3_invariance_functions = {'svd': svd_basis}
+dict_L3_invariance_functions = {'svd': svd_basis,
+                                }
 
 def invariance(model: SliceTCA,
                L2: str = 'regularization',
@@ -21,8 +22,9 @@ def invariance(model: SliceTCA,
     :return: model with modified components.
     """
 
-    if sum([r!=0 for r in model.ranks])>1:
+    if sum([r!=0 for r in model.ranks])>1 and L2 is not None:
         model = sgd_invariance(model, objective_function=dict_L2_invariance_objectives[L2], **kwargs)
-    model = dict_L3_invariance_functions[L3](model, **kwargs)
+    if L3 is not None:
+        model = dict_L3_invariance_functions[L3](model, **kwargs)
 
     return model

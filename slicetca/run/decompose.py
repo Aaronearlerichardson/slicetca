@@ -23,7 +23,8 @@ def decompose(data: Union[torch.Tensor, np.array],
               seed: int = 7,
               weight_decay: float = None,
               batch_prop_decay: int = 1,
-              loss_function: callable = None):
+              loss_function: callable = None,
+              init_weight: torch.Tensor = None) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -67,7 +68,8 @@ def decompose(data: Union[torch.Tensor, np.array],
     else: decomposition = SliceTCA
 
     model = decomposition(dimensions, number_components, positive,
-                          initialization, device=data.device, dtype=data.dtype)
+                          initialization, device=data.device, dtype=data.dtype,
+                          init_weight=init_weight)
 
     if weight_decay is None:
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)

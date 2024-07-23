@@ -64,6 +64,8 @@ class PartitionTCA(nn.Module):
                 v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
                 v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
+            elif initialization == 'zeros':
+                v = [nn.Parameter(positive_function[i][j](torch.zeros([r] + d, **init_params))) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
