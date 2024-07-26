@@ -128,6 +128,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
         data = data.to_dense()[mask_test]
     elif mask_test is not None:
         data = data[mask_test]
+        data_hat = data_hat[mask_test]
     loss = torch.mean(loss_function(data, data_hat)).item()
 
     return loss
