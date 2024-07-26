@@ -5,7 +5,19 @@ import tqdm
 from collections.abc import Iterable
 
 from typing import Sequence, Union, Callable
+from torch.masked import masked_tensor, as_masked_tensor, MaskedTensor
 
+
+def mask_subset(masked: MaskedTensor, subset: torch.Tensor):
+    """
+    Returns a MaskedTensor with the subset of the mask.
+
+    :param masked: MaskedTensor.
+    :param subset: Subset of the mask.
+    :return: MaskedTensor.
+    """
+
+    return as_masked_tensor(masked.get_data().clone(), masked.get_mask().logical_and(subset))
 
 class PartitionTCA(nn.Module):
 
@@ -64,8 +76,15 @@ class PartitionTCA(nn.Module):
                 v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
                 v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
-            elif initialization == 'zeros':
-                v = [nn.Parameter(positive_function[i][j](torch.zeros([r] + d, **init_params))) for j, d in enumerate(dim)]
+            elif initialization == 'rand-ones':
+                def rand_ones(dim):
+                    dist = torch.rand(size=dim)
+                    diff = 1 / r
+                    n = 0
+                    for k in range(r):
+                        yield torch.where((n + diff > dist).logical_and(dist > n), 1, 0)
+                        n += diff
+                v = [nn.Parameter(positive_function[i][j]([ones for ones in rand_ones(d)])) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -127,8 +146,11 @@ class PartitionTCA(nn.Module):
         :param k: Number of the component
         :return: Tensor of shape self.dimensions
         """
-
-        temp = [self.positive_function[partition][q](self.vectors[partition][q][k]) for q in range(len(self.components[partition]))]
+        temp = []
+        for q in range(len(self.components[partition])):
+            func = self.positive_function[partition][q]
+            temp.append(func(self.vectors[partition][q][k]))
+        # temp = [self.positive_function[partition][q](self.vectors[partition][q][k]) for q in range(len(self.components[partition]))]
         outer = torch.einsum(self.einsums[partition], temp)
         outer = outer.permute(self.inverse_permutations[partition])
 
@@ -228,56 +250,33 @@ class PartitionTCA(nn.Module):
         """
 
         losses = []
-        if mask is not None and X.is_sparse:
-            new_mask = torch.zeros_like(mask)
-            new_mask[tuple(X.indices())] = True
-            new_mask = new_mask & mask
-            X = torch.sparse_coo_tensor(new_mask.nonzero().t(),
-                                        X.to_dense()[new_mask], X.shape,
-                                        device=self.device).coalesce()
-            mask = None
-            total_entries = X._nnz()
-        elif mask is not None:
+        if mask is not None:
             X = X[mask]
-            # X[~mask] = 0.0
-            total_entries = torch.sum(mask).item()
-            mask=None
-        elif X.is_sparse:
-            total_entries = X._nnz()
+            total_entries = round(torch.sum(mask).item())
         else:
             total_entries = self.entries
         batch_entries = batch_prop * total_entries
 
         iterator = tqdm.tqdm(range(max_iter)) if progress_bar else range(max_iter)
-        #
-        # if batch_prop != 1.0:
-        #     uni = torch.empty(self.dimensions, device=self.device, dtype=torch.half)
 
         for iteration in iterator:
 
+            # X_hat = as_masked_tensor(self.construct(), mask) if mask is not None else self.construct()
             X_hat = self.construct()
+            if mask is not None:
+                X_hat = X_hat[mask]
 
             loss_entries = loss_function(X, X_hat)
-            if mask is not None:
-                entries = loss_entries * mask
+            total_loss = torch.sum(loss_entries, dtype=torch.float64) / total_entries
+
+            if batch_prop != 1.0:
+
+                batch_mask = torch.rand(loss_entries.shape, device=self.device, dtype=torch.half) < batch_prop
+                batch_loss = loss_entries * batch_mask
+                loss = batch_loss.sum(dtype=torch.float64) / batch_entries
+
             else:
-                entries = loss_entries
-            total_loss = torch.sum(entries) / total_entries
-
-            if batch_prop != 1.0: batch_mask = torch.rand(
-                loss_entries.shape, device=self.device, dtype=torch.half) < batch_prop
-
-            if mask is None and batch_prop == 1.0:
                 loss = total_loss
-            else:
-                if mask is None:
-                    total_mask = batch_mask
-                elif batch_prop == 1.0:
-                    total_mask = mask
-                else:
-                    total_mask = mask & batch_mask
-
-                loss = torch.sum(loss_entries * total_mask) / batch_entries
 
             optimizer.zero_grad()
             loss.backward()

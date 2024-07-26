@@ -117,7 +117,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
     if (number_components == np.zeros_like(number_components)).all():
         data_hat = 0
     else:
-        loss_function = kwargs.pop('loss_function', partial(mse, mask=mask_train))
+        loss_function = kwargs.pop('loss_function', torch.nn.MSELoss(reduction='none'))
         _, model = decompose(data, number_components, mask=mask_train, verbose=False, progress_bar=False, *args,
                              seed=seed,loss_function=loss_function, **kwargs)
         data_hat = model.construct()
@@ -125,10 +125,8 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
     loss_function = kwargs.pop('loss_function', torch.nn.MSELoss(reduction='none'))
 
     if mask_test is not None and data.is_sparse:
-        loss_function = partial(mse, mask=mask_test)
         data = data.to_dense()[mask_test]
     elif mask_test is not None:
-        loss_function = partial(mse, mask=mask_test)
         data = data[mask_test]
     loss = torch.mean(loss_function(data, data_hat)).item()
 
