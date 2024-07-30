@@ -3,12 +3,13 @@ from slicetca.invariance.analytic_invariance import svd_basis
 from slicetca.invariance.criteria import *
 from slicetca.core.decompositions import SliceTCA
 
-dict_L2_invariance_objectives = {'regularization': l2}
+dict_L2_invariance_objectives = {'orthogonality': orthogonality_component_type_wise,
+                                 'L2': l2}
 dict_L3_invariance_functions = {'svd': svd_basis,
                                 }
 
 def invariance(model: SliceTCA,
-               L2: str = 'regularization',
+               L2: str = 'orthogonality',
                L3: str = 'svd',
                **kwargs):
     """

@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from typing import Sequence, Union, Callable
 from torch.masked import masked_tensor, as_masked_tensor, MaskedTensor
+from slicetca.core.helper_functions import to_sparse, subselect
 
 
 def mask_subset(masked: MaskedTensor, subset: torch.Tensor):
@@ -84,7 +85,7 @@ class PartitionTCA(nn.Module):
                     for k in range(r):
                         yield torch.where((n + diff > dist).logical_and(dist > n), 1, 0)
                         n += diff
-                v = [nn.Parameter(positive_function[i][j]([ones for ones in rand_ones(d)])) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function[i][j](torch.as_tensor([ones for ones in rand_ones(d)]))) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -251,7 +252,7 @@ class PartitionTCA(nn.Module):
 
         losses = []
         if mask is not None:
-            X = X[mask]
+            X = to_sparse(X, mask)
             total_entries = round(torch.sum(mask).item())
         else:
             total_entries = self.entries
@@ -264,7 +265,7 @@ class PartitionTCA(nn.Module):
             # X_hat = as_masked_tensor(self.construct(), mask) if mask is not None else self.construct()
             X_hat = self.construct()
             if mask is not None:
-                X_hat = X_hat[mask]
+                X_hat = to_sparse(X_hat, mask)
 
             loss_entries = loss_function(X, X_hat)
             total_loss = torch.sum(loss_entries, dtype=torch.float64) / total_entries
@@ -272,7 +273,7 @@ class PartitionTCA(nn.Module):
             if batch_prop != 1.0:
 
                 batch_mask = torch.rand(loss_entries.shape, device=self.device, dtype=torch.half) < batch_prop
-                batch_loss = loss_entries * batch_mask
+                batch_loss = subselect(loss_entries, batch_mask) if loss_entries.is_sparse else loss_entries * batch_mask
                 loss = batch_loss.sum(dtype=torch.float64) / batch_entries
 
             else:
