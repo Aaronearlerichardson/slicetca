@@ -24,7 +24,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               weight_decay: float = None,
               batch_prop_decay: int = 1,
               loss_function: callable = None,
-              init_weight: torch.Tensor = None) -> (list, Union[SliceTCA, TCA]):
+              **kwargs) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -69,8 +69,9 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     model = decomposition(dimensions, number_components, positive,
                           initialization, device=data.device, dtype=data.dtype,
-                          init_weight=init_weight)
-
+                          **kwargs)
+    # if mask is not None:
+    #     optimizer = torch.optim.SparseAdam(model.parameters(), lr=learning_rate)
     if weight_decay is None:
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     else: optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate,

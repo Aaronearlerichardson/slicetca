@@ -1,4 +1,5 @@
 import torch
+import itertools
 
 
 def squared_difference(x, x_hat):
@@ -42,6 +43,18 @@ def to_sparse(x: torch.Tensor, mask: torch.Tensor):
     return out
 
 
+def generate_square_wave_tensor(*dims):
+    tensor = torch.zeros(dims, dtype=torch.float64)
+    wave_length = dims[-1] // 2
+
+    for idx in itertools.product(*[range(d) for d in dims[:-1]]):
+        start = (sum(idx) * wave_length) % dims[-1]
+        end = start + wave_length
+        tensor[idx + (slice(start, end),)] = 1
+
+    return tensor
+
+
 def subselect(coo_tensor: torch.sparse_coo_tensor, mask: torch.Tensor):
     """
     Subselects a sparse tensor based on a mask. The mask should be a boolean
@@ -54,6 +67,7 @@ def subselect(coo_tensor: torch.sparse_coo_tensor, mask: torch.Tensor):
     :return: torch.sparse_coo_tensor
     """
     # Create a mask for the original tensor
+    coo_tensor = coo_tensor.coalesce() if not coo_tensor.is_coalesced() else coo_tensor
     orig_mask = torch.zeros(coo_tensor.shape, dtype=torch.bool, device=coo_tensor.device)
     orig_mask[*coo_tensor.indices()] = True
 
