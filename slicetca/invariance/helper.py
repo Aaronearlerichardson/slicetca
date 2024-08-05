@@ -43,6 +43,22 @@ def construct_per_type(model: SliceTCA, components: Sequence[Sequence[torch.Tens
     return temp
 
 
+def construct_per_component(model: SliceTCA, components: Sequence[Sequence[torch.Tensor]]):
+    """
+    :param model: SliceTCA model.
+    :param components: The components to construct.
+    :return: Reconstructed tensor.
+    """
+
+    temp = []
+
+    for i in range(len(components)):
+        for j in range(model.ranks[i]):
+            temp.append(construct_single_component(
+                model, components, i, j).to(model.device))
+    return temp
+
+
 def construct_single_component(model: SliceTCA, components: Sequence[Sequence[torch.Tensor]], partition: int, k: int):
 
     temp2 = [model.positive_function[partition][q](components[partition][q][k]) for q in range(len(components[partition]))]

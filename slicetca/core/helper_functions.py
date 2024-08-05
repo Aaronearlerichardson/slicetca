@@ -2,8 +2,11 @@ import torch
 import itertools
 
 
-def squared_difference(x, x_hat):
-    return (x - x_hat) ** 2
+def squared_difference(x, x_hat, weights=None):
+    out = (x - x_hat) ** 2
+    if weights is not None:
+        out *= weights / weights.mean()
+    return out
 
 
 def poisson_log_likelihood(spikes, rates, spikes_factorial, activation=torch.nn.functional.softplus):
@@ -39,6 +42,8 @@ def to_sparse(x: torch.Tensor, mask: torch.Tensor):
                                   device=x.device,
                                   requires_grad=True,
                                   is_coalesced=True)
+    try: out = out.to_sparse_csr(1)
+    except: pass
 
     return out
 

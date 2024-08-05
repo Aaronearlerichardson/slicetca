@@ -1,4 +1,4 @@
-from slicetca.invariance.iterative_invariance import sgd_invariance
+from slicetca.invariance.iterative_invariance import sgd_invariance, within_invariance
 from slicetca.invariance.analytic_invariance import svd_basis
 from slicetca.invariance.criteria import *
 from slicetca.core.decompositions import SliceTCA
@@ -6,7 +6,8 @@ from slicetca.core.decompositions import SliceTCA
 dict_L2_invariance_objectives = {'orthogonality': orthogonality_component_type_wise,
                                  'L2': l2}
 dict_L3_invariance_functions = {'svd': svd_basis,
-                                }
+                                'orthogonality': orthogonality_component_type_wise}
+
 
 def invariance(model: SliceTCA,
                L2: str = 'orthogonality',
@@ -25,6 +26,8 @@ def invariance(model: SliceTCA,
 
     if sum([r!=0 for r in model.ranks])>1 and L2 is not None:
         model = sgd_invariance(model, objective_function=dict_L2_invariance_objectives[L2], **kwargs)
+    elif L2 is not None:
+        model = within_invariance(model, objective_function=dict_L2_invariance_objectives[L2], **kwargs)
     if L3 is not None:
         model = dict_L3_invariance_functions[L3](model, **kwargs)
 
