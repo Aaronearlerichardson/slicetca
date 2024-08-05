@@ -87,9 +87,10 @@ class TransformationWithin(nn.Module):
         self.ranks = model.ranks
         self.number_components = len(model.ranks)
         self.device = model.device
+        dtype = model.vectors[0][0].dtype
 
-        self.free_gl = nn.ParameterList([nn.Parameter(torch.eye(i, device=self.device)+torch.randn((i,i),
-                                                    device=self.device)/np.sqrt(3*i)) for i in self.ranks])
+        self.free_gl = nn.ParameterList([nn.Parameter(torch.eye(i, device=self.device, dtype=dtype)+torch.randn((i,i),
+                                                    device=self.device, dtype=dtype)/np.sqrt(3*i)) for i in self.ranks])
 
     def forward(self, components):
 
