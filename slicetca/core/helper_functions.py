@@ -43,7 +43,9 @@ def to_sparse(x: torch.Tensor, mask: torch.Tensor):
                                   requires_grad=True,
                                   is_coalesced=True)
     try: out = out.to_sparse_csr(1)
-    except: pass
+    except:
+        try: out = out.to_sparse_csr(0)
+        except: pass
 
     return out
 
@@ -88,4 +90,24 @@ def subselect(coo_tensor: torch.sparse_coo_tensor, mask: torch.Tensor):
                                   is_coalesced=True)
 
     return out
+
+
+def huber_loss(x, y, delta=1.0):
+    """
+    Huber loss function. This function is less sensitive to outliers in the data
+    than the mean squared error loss function.
+
+    :param x: torch.Tensor
+    :param y: torch.Tensor
+    :param delta: float
+    :return: torch.Tensor
+    """
+    diff = torch.abs(x - y)
+    if diff.is_sparse:
+        diff = diff.to_dense()
+    loss = torch.where(diff < delta,
+                       0.5 * diff ** 2,
+                       delta * (diff - 0.5 * delta))
+
+    return loss
 

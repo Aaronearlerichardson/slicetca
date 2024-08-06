@@ -4,7 +4,11 @@ from slicetca.invariance.criteria import *
 from slicetca.core.decompositions import SliceTCA
 
 dict_L2_invariance_objectives = {'orthogonality': orthogonality_component_type_wise,
-                                 'L2': l2}
+                                 'L2': l2,
+                                 'peaks': peak_coincidence,
+                                 'dtw': dtw,
+                                 'soft_dtw': soft_dtw}
+
 dict_L3_invariance_functions = {'svd': svd_basis,
                                 'orthogonality': orthogonality_component_type_wise}
 

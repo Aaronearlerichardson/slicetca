@@ -6,7 +6,8 @@ from collections.abc import Iterable
 
 from typing import Sequence, Union, Callable
 from torch.masked import masked_tensor, as_masked_tensor, MaskedTensor
-from slicetca.core.helper_functions import to_sparse, subselect
+from slicetca.core.helper_functions import to_sparse, subselect, generate_square_wave_tensor
+from slicetca import invariance
 
 
 def mask_subset(masked: MaskedTensor, subset: torch.Tensor):
@@ -19,6 +20,7 @@ def mask_subset(masked: MaskedTensor, subset: torch.Tensor):
     """
 
     return as_masked_tensor(masked.get_data().clone(), masked.get_mask().logical_and(subset))
+
 
 class PartitionTCA(nn.Module):
 
@@ -53,9 +55,10 @@ class PartitionTCA(nn.Module):
         components = [[[dimensions[k] for k in j] for j in i] for i in partitions]
 
         if init_weight is None:
-            if initialization == 'normal': init_weight = 1/np.sqrt(sum(ranks))
-            if initialization == 'uniform-positive': init_weight = ((0.5 / sum(ranks)) ** (1 / max([len(p) for p in partitions])))*2
-            if initialization == 'uniform': init_weight = 1/np.sqrt(sum(ranks))
+            if initialization in ['normal', 'uniform', 'steps'] : init_weight = 1/np.sqrt(sum(ranks))
+            elif initialization == 'uniform-positive': init_weight = ((0.5 / sum(ranks)) ** (1 / max([len(p) for p in partitions])))*2
+            else: raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
+
         if init_bias is None: init_bias = 0.0
 
         if isinstance(positive, bool):
@@ -77,15 +80,8 @@ class PartitionTCA(nn.Module):
                 v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
                 v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
-            elif initialization == 'rand-ones':
-                def rand_ones(dim):
-                    dist = torch.rand(size=dim)
-                    diff = 1 / r
-                    n = 0
-                    for k in range(r):
-                        yield torch.where((n + diff > dist).logical_and(dist > n), 1, 0)
-                        n += diff
-                v = [nn.Parameter(positive_function[i][j](torch.as_tensor([ones for ones in rand_ones(d)]))) for j, d in enumerate(dim)]
+            elif initialization == 'steps':
+                v = [nn.Parameter(positive_function[i][j](generate_square_wave_tensor(*([r] + d))*init_weight + init_bias)) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -293,6 +289,8 @@ class PartitionTCA(nn.Module):
             if len(losses) > iter_std and np.array(losses[-iter_std:]).std() < min_std:
                 if progress_bar: iterator.set_description('The model converged. Loss: ' + str(total_loss) + ' ')
                 break
+            # else:
+            #     invariance(self, 'orthogonality', None)
 
         self.losses += losses
 
