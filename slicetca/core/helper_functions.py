@@ -27,25 +27,28 @@ def to_sparse(x: torch.Tensor, mask: torch.Tensor):
     :param mask: torch.Tensor
     :return: torch.sparse_coo_tensor
     """
-    # Create a mask for the original tensor
-    orig_mask = torch.zeros(x.shape, dtype=torch.bool, device=x.device)
-    orig_mask[mask] = True
-
-    # # check if the mask allows for sparse compression in any particular dimension
-    # if mask.any(dim=0).all():
-    #     out = torch.sparse_compressed_tensor()
 
     # Create the new coo tensor
-    out = torch.sparse_coo_tensor(orig_mask.nonzero().t(),
-                                  x[mask],
-                                  x.shape,
-                                  device=x.device,
-                                  requires_grad=True,
-                                  is_coalesced=True)
-    try: out = out.to_sparse_csr(1)
-    except:
-        try: out = out.to_sparse_csr(0)
-        except: pass
+    dense_dims = []
+    for i in range(x.ndim):
+        if (mask.any(i) == mask.all(i)).all():
+            dense_dims.append(i)
+
+    with torch.no_grad():
+        if len(dense_dims) == 0:
+            out = torch.sparse_coo_tensor(mask.nonzero().t(),
+                                          x[mask],
+                                          x.shape,
+                                          device=x.device,
+                                          requires_grad=True,
+                                          is_coalesced=True)
+        else:
+            out = torch.sparse_coo_tensor(mask.any(dense_dims).nonzero().t(),
+                                          x[mask.any(dense_dims)],
+                                          x.shape,
+                                          device=x.device,
+                                          requires_grad=True,
+                                          is_coalesced=True)
 
     return out
 
@@ -104,7 +107,7 @@ def huber_loss(x, y, delta=1.0):
     """
     diff = torch.abs(x - y)
     if diff.is_sparse:
-        diff = diff.to_dense()
+        diff = diff.values()
     loss = torch.where(diff < delta,
                        0.5 * diff ** 2,
                        delta * (diff - 0.5 * delta))

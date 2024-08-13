@@ -1,11 +1,13 @@
 from slicetca.core import SliceTCA, TCA
-from slicetca.core.helper_functions import squared_difference, poisson_log_likelihood
+from slicetca.core.helper_functions import poisson_log_likelihood
 
 import torch
 from typing import Union, Sequence
 import numpy as np
 import scipy
 from functools import partial
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import EarlyStopping
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -13,7 +15,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               positive: bool = False,
               initialization: str = 'uniform',
               learning_rate: float = 5*10**-3,
-              batch_prop: float = 0.2,
+              batch_dim: int = None,
               max_iter: int = 10000,
               min_std: float = 10**-5,
               iter_std: int = 100,
@@ -23,9 +25,8 @@ def decompose(data: Union[torch.Tensor, np.array],
               seed: int = 7,
               weight_decay: float = None,
               batch_prop_decay: int = 1,
-              loss_function: callable = None,
-              rotate: callable = None,
-              **kwargs) -> (list, Union[SliceTCA, TCA]):
+              init_bias: float = 0.,
+              loss_function: callable = None) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -63,22 +64,44 @@ def decompose(data: Union[torch.Tensor, np.array],
                                     spikes_factorial=spikes_factorial)
 
     dimensions = list(data.shape)
+    if batch_dim is not None:
+        dimensions.pop(batch_dim)
 
     if isinstance(number_components, int): decomposition = TCA
     elif len(number_components) == 1: decomposition = TCA
     else: decomposition = SliceTCA
 
     model = decomposition(dimensions, number_components, positive,
-                          initialization, device=data.device, dtype=data.dtype,
-                          **kwargs)
-    if weight_decay is None:
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    else: optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate,
-                                        weight_decay=weight_decay)
+                          initialization, dtype=data.dtype, lr=learning_rate,
+                          weight_decay=weight_decay, loss=loss_function,
+                          init_bias=init_bias)
 
-    for i in range(1,batch_prop_decay+1):
-        model.fit(data, optimizer, loss_function, 1-(1-batch_prop)**i,
-                  max_iter, min_std, iter_std, mask, verbose, progress_bar)
-        # if
+    early_stop_callback = EarlyStopping(monitor="train_loss",
+                                        min_delta=min_std,
+                                        patience=iter_std, verbose=verbose,
+                                          mode="min",
+                                          check_on_train_epoch_end=True)
+    cb = [early_stop_callback]
+    if verbose:
+        profiler = "advanced"
+    else:
+        profiler = None
+    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=0,
+                         # limit_train_batches=max_iter,
+                         enable_progress_bar=progress_bar,
+                         callbacks=cb, profiler=profiler)
+    if mask is None:
+        mask = torch.ones(dimensions, device=data.device, dtype=torch.bool)
+    trainer.fit(model, _feed(data, mask, batch_dim))
 
     return model.get_components(numpy=True), model
+
+
+def _feed(data, mask, batch_dim):
+    assert data.shape == mask.shape
+    if batch_dim is None:
+        yield data, mask
+    else:
+        for i in range(data.shape[batch_dim]):
+            idx = [slice(None) if j != batch_dim else i for j in range(data.ndim)]
+            yield data[idx], mask[idx]

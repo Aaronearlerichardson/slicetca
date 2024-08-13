@@ -1,28 +1,15 @@
 import torch
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch import nn
 import numpy as np
-import tqdm
 from collections.abc import Iterable
 
-from typing import Sequence, Union, Callable
-from torch.masked import masked_tensor, as_masked_tensor, MaskedTensor
-from slicetca.core.helper_functions import to_sparse, subselect, generate_square_wave_tensor
-from slicetca import invariance
+from typing import Any, Sequence, Union, Callable
+from slicetca.core.helper_functions import generate_square_wave_tensor
+import pytorch_lightning as pl
 
 
-def mask_subset(masked: MaskedTensor, subset: torch.Tensor):
-    """
-    Returns a MaskedTensor with the subset of the mask.
-
-    :param masked: MaskedTensor.
-    :param subset: Subset of the mask.
-    :return: MaskedTensor.
-    """
-
-    return as_masked_tensor(masked.get_data().clone(), masked.get_mask().logical_and(subset))
-
-
-class PartitionTCA(nn.Module):
+class PartitionTCA(pl.LightningModule):
 
     def __init__(self,
                  dimensions: Sequence[int],
@@ -30,10 +17,12 @@ class PartitionTCA(nn.Module):
                  ranks: Sequence[int],
                  positive: Union[bool, Sequence[Sequence[Callable]]] = False,
                  initialization: str = 'uniform',
+                 lr: float = 5 * 10 ** -3,
+                 weight_decay: float = None,
                  init_weight: float = None,
-                 init_bias: float = None,
-                 device: str = 'cpu',
-                 dtype: torch.dtype = torch.float64):
+                 init_bias: float = 0.0,
+                 dtype: torch.dtype = torch.float64,
+                 loss: callable = nn.MSELoss(reduction='none')):
         """
         Parent class for the sliceTCA and TCA decompositions.
 
@@ -59,8 +48,6 @@ class PartitionTCA(nn.Module):
             elif initialization == 'uniform-positive': init_weight = ((0.5 / sum(ranks)) ** (1 / max([len(p) for p in partitions])))*2
             else: raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
-        if init_bias is None: init_bias = 0.0
-
         if isinstance(positive, bool):
             if positive: positive_function = [[torch.abs for j in i] for i in partitions]
             else: positive_function = [[self.identity for j in i] for i in partitions]
@@ -68,7 +55,7 @@ class PartitionTCA(nn.Module):
 
         vectors = nn.ModuleList([])
 
-        init_params = dict(device=device, dtype=dtype)
+        init_params = dict(device=self.device, dtype=dtype)
         for i in range(len(ranks)):
             r = ranks[i]
             dim = components[i]
@@ -96,15 +83,17 @@ class PartitionTCA(nn.Module):
         self.initialization = initialization
         self.init_weight = init_weight
         self.init_bias = init_bias
-        self.device = device
-        self.dtype = dtype
+        self.to(dtype)
 
         self.components = components
         self.positive_function = positive_function
         self.valence = len(dimensions)
-        self.entries = np.prod(dimensions)
 
+        self.loss = loss
         self.losses = []
+        self._lr = lr
+        self._weight_decay = weight_decay
+        self._cache = {}
 
         self.inverse_permutations = []
         self.flattened_permutations = []
@@ -181,6 +170,9 @@ class PartitionTCA(nn.Module):
 
         return temp
 
+    def forward(self):
+        return self.construct()
+
     def get_components(self, detach=False, numpy=False):
         """
         Returns the components of the model.
@@ -220,79 +212,28 @@ class PartitionTCA(nn.Module):
                         self.vectors[i][j].copy_(torch.tensor(components[i][j], device=self.device))
         self.zero_grad()
 
-    def fit(self,
-            X: torch.Tensor,
-            optimizer: torch.optim.Optimizer,
-            loss_function: Callable = nn.MSELoss(reduction='none'),
-            batch_prop: float = 0.2,
-            max_iter: int = 10000,
-            min_std: float = 10 ** -3,
-            iter_std: int = 100,
-            mask: torch.Tensor = None,
-            verbose: bool = False,
-            progress_bar: bool = True):
-        """
-        Fits the model to data.
+    def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
+        X, mask = batch
+        X_hat = self.construct()
+        loss_entries = self.loss(X, X_hat)
+        # loss_entries *= mask
+        if mask.data_ptr() not in self._cache:
+            self._cache[mask.data_ptr()] = mask.sum(dtype=torch.int64)
+        loss = loss_entries[mask].sum(dtype=torch.float64) / self._cache[mask.data_ptr()]
+        self.losses.append(loss.item())
+        self.log_dict({'train_loss': self.losses[-1]}, prog_bar=True)
+        return loss
 
-        :param X: The data tensor.
-        :param optimizer: A torch optimizer.
-        :param loss_function: The final loss if torch.mean(loss_function(X, X_hat)). That is, loss_function: R^n -> R^n.
-        :param batch_prop: Proportion of entries used to compute the gradient at every training iteration.
-        :param max_iter: Maximum training iterations.
-        :param min_std: Minimum std of the loss under which to return.
-        :param iter_std: Number of iterations over which this std is computed.
-        :param mask: Entries which are not used to compute the gradient at any training iteration.
-        :param verbose: Whether to print the loss at every step.
-        :param progress_bar: Whether to have a tqdm progress bar.
-        """
+    def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
+        return self.losses[-1]
 
-        losses = []
-        if mask is not None:
-            X = to_sparse(X, mask)
-            total_entries = round(torch.sum(mask).item())
+    def configure_optimizers(self):
+        if self._weight_decay is None:
+            optimizer = torch.optim.Adam(self.parameters(), lr=self._lr)
         else:
-            total_entries = self.entries
-        batch_entries = batch_prop * total_entries
-
-        iterator = tqdm.tqdm(range(max_iter)) if progress_bar else range(max_iter)
-
-        for iteration in iterator:
-
-            # X_hat = as_masked_tensor(self.construct(), mask) if mask is not None else self.construct()
-            X_hat = self.construct()
-            if mask is not None:
-                X_hat = to_sparse(X_hat, mask)
-
-            loss_entries = loss_function(X, X_hat)
-            total_loss = torch.sum(loss_entries, dtype=torch.float64) / total_entries
-
-            if batch_prop != 1.0:
-
-                batch_mask = torch.rand(loss_entries.shape, device=self.device, dtype=torch.half) < batch_prop
-                batch_loss = subselect(loss_entries, batch_mask) if loss_entries.is_sparse else loss_entries * batch_mask
-                loss = batch_loss.sum(dtype=torch.float64) / batch_entries
-
-            else:
-                loss = total_loss
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_loss = total_loss.item()
-
-            losses.append(total_loss)
-
-            if verbose: print('Iteration:', iteration, 'Loss:', total_loss)
-            if progress_bar: iterator.set_description('Loss: ' + str(total_loss) + ' ')
-
-            if len(losses) > iter_std and np.array(losses[-iter_std:]).std() < min_std:
-                if progress_bar: iterator.set_description('The model converged. Loss: ' + str(total_loss) + ' ')
-                break
-            # else:
-            #     invariance(self, 'orthogonality', None)
-
-        self.losses += losses
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self._lr,
+                                          weight_decay=self._weight_decay)
+        return optimizer
 
 
 class SliceTCA(PartitionTCA):
@@ -301,10 +242,12 @@ class SliceTCA(PartitionTCA):
                  ranks: Sequence[int], 
                  positive: bool = False, 
                  initialization: str = 'uniform',
+                 lr: float = 5 * 10 ** -3,
+                 weight_decay: float = None,
                  init_weight: float = None,
-                 init_bias: float = None,
-                 device: str = 'cpu',
-                 dtype: torch.dtype = torch.float64):
+                 init_bias: float = 0.0,
+                 dtype: torch.dtype = torch.float64,
+                 loss: callable = nn.MSELoss(reduction='none')):
         """
         Main sliceTCA decomposition class.
 
@@ -327,10 +270,12 @@ class SliceTCA(PartitionTCA):
                          partitions=partitions,
                          positive=positive,
                          initialization=initialization,
+                         lr=lr,
+                         weight_decay=weight_decay,
                          init_weight=init_weight,
                          init_bias=init_bias,
-                         device=device,
-                         dtype=dtype)
+                         dtype=dtype,
+                         loss=loss)
 
 
 class TCA(PartitionTCA):
@@ -339,10 +284,12 @@ class TCA(PartitionTCA):
                  rank: int,
                  positive: bool = False,
                  initialization: str = 'uniform',
+                 lr: float = 5 * 10 ** -3,
+                 weight_decay: float = None,
                  init_weight: float = None,
-                 init_bias: float = None,
-                 device: str = 'cpu',
-                 dtype: torch.dtype = torch.float64):
+                 init_bias: float = 0.0,
+                 dtype: torch.dtype = torch.float64,
+                 loss: callable = nn.MSELoss(reduction='none')):
         """
         Main TCA decomposition class.
 
@@ -368,7 +315,9 @@ class TCA(PartitionTCA):
                          partitions=partitions,
                          positive=positive,
                          initialization=initialization,
+                         lr=lr,
+                         weight_decay=weight_decay,
                          init_weight=init_weight,
                          init_bias=init_bias,
-                         device=device,
-                         dtype=dtype)
+                         dtype=dtype,
+                         loss=loss)
