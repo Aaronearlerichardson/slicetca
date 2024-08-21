@@ -106,9 +106,6 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
 
     return loss, seeds
 
-def mse(x, y, mask):
-    return (x - torch.masked_select(y, mask)) ** 2
-
 
 def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **kwargs):
 
@@ -128,8 +125,15 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
         data = data.to_dense()[mask_test]
     elif mask_test is not None:
         data = data[mask_test]
-        data_hat = data_hat[mask_test]
-    loss = torch.mean(loss_function(data, data_hat)).item()
+        if isinstance(data_hat, int):
+            return torch.mean(data).item()
+        elif data_hat.shape == mask_test.shape:
+            data_hat = data_hat[mask_test]
+        else:
+            raise ValueError('Mask test shape does not match data shape.')
+
+    loss = loss_function(data, data_hat)
+    if torch.is_tensor(loss): loss = torch.mean(loss).item()
 
     return loss
 

@@ -8,6 +8,7 @@ import scipy
 from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
+from ieeg.calc.fast import mixup
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -20,13 +21,14 @@ def decompose(data: Union[torch.Tensor, np.array],
               min_std: float = 10**-5,
               iter_std: int = 100,
               mask: torch.Tensor = None,
-              verbose: bool = False,
               progress_bar: bool = True,
               seed: int = 7,
               weight_decay: float = None,
               batch_prop_decay: int = 1,
+              batch_prop = 0.2,
               init_bias: float = 0.,
-              loss_function: callable = None) -> (list, Union[SliceTCA, TCA]):
+              loss_function: callable = None,
+              verbose: int = 0) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -64,6 +66,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                                     spikes_factorial=spikes_factorial)
 
     dimensions = list(data.shape)
+
     if batch_dim is not None:
         dimensions.pop(batch_dim)
 
@@ -79,29 +82,55 @@ def decompose(data: Union[torch.Tensor, np.array],
     early_stop_callback = EarlyStopping(monitor="train_loss",
                                         min_delta=min_std,
                                         patience=iter_std, verbose=verbose,
-                                          mode="min",
-                                          check_on_train_epoch_end=True)
+                                        mode="min", check_on_train_epoch_end=True)
     cb = [early_stop_callback]
-    if verbose:
-        profiler = "advanced"
-    else:
+    if verbose==0:
         profiler = None
+        detect_anomaly = False
+    elif verbose==1:
+        profiler = "simple"
+        detect_anomaly = False
+    elif verbose==2:
+        profiler = "advanced"
+        detect_anomaly = False
+    elif verbose==3:
+        profiler = None
+        detect_anomaly = True
+    else:
+        raise ValueError("verbose must be 0, 1, 2, or 3")
+
+    batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     trainer = pl.Trainer(max_epochs=max_iter, min_epochs=0,
-                         # limit_train_batches=max_iter,
+                         limit_train_batches=batch_num,
                          enable_progress_bar=progress_bar,
-                         callbacks=cb, profiler=profiler)
+                         callbacks=cb, profiler=profiler,
+                         detect_anomaly=detect_anomaly)
+
     if mask is None:
-        mask = torch.ones(dimensions, device=data.device, dtype=torch.bool)
-    trainer.fit(model, _feed(data, mask, batch_dim))
+        mask = torch.ones_like(data, dtype=torch.bool)
+    data[~mask] = 0
+    for i in range(batch_prop_decay):
+        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
 
     return model.get_components(numpy=True), model
 
 
-def _feed(data, mask, batch_dim):
-    assert data.shape == mask.shape
-    if batch_dim is None:
-        yield data, mask
-    else:
-        for i in range(data.shape[batch_dim]):
-            idx = [slice(None) if j != batch_dim else i for j in range(data.ndim)]
-            yield data[idx], mask[idx]
+def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
+    assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
+    assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
+    rand_gen = torch.distributions.uniform.Uniform(0, 1)
+    while True:
+        if batch_prop < 1.0:
+            batch = rand_gen.sample(mask.shape) < batch_prop
+            mask_out = mask & batch
+        else:
+            mask_out = mask
+
+        if batch_dim is None:
+            yield data, mask_out
+        else:
+            for i in range(data.shape[batch_dim]):
+                idx = [slice(None) if j != batch_dim else i
+                       for j in range(data.ndim)]
+                if mask_out[idx].any():
+                    yield data[idx], mask_out[idx]

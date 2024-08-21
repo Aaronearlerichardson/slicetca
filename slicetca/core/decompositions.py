@@ -214,18 +214,21 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
+        X *= mask
         X_hat = self.construct()
-        loss_entries = self.loss(X, X_hat)
-        # loss_entries *= mask
-        if mask.data_ptr() not in self._cache:
-            self._cache[mask.data_ptr()] = mask.sum(dtype=torch.int64)
-        loss = loss_entries[mask].sum(dtype=torch.float64) / self._cache[mask.data_ptr()]
+        X_hat *= mask
+        loss = self.loss(X, X_hat).sum(dtype=torch.float64) / mask.sum(dtype=torch.int64)
         self.losses.append(loss.item())
-        self.log_dict({'train_loss': self.losses[-1]}, prog_bar=True)
+        self.log("train_loss", loss, on_step=True,
+                 on_epoch=True, prog_bar=True, logger=True)
         return loss
 
-    def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
-        return self.losses[-1]
+    # def on_train_epoch_end(self):
+    #     # do something with all training_step outputs, for example:
+    #     start_idx = self.trainer.num_training_batches * self.current_epoch
+    #     epoch_mean = torch.as_tensor(self.losses[start_idx:]).mean()
+    #     # pl_module.log("training_mean", epoch_mean.item(), prog_bar=True)
+    #     super().on_train_epoch_end()
 
     def configure_optimizers(self):
         if self._weight_decay is None:
@@ -233,6 +236,7 @@ class PartitionTCA(pl.LightningModule):
         else:
             optimizer = torch.optim.AdamW(self.parameters(), lr=self._lr,
                                           weight_decay=self._weight_decay)
+        super().configure_optimizers()
         return optimizer
 
 
