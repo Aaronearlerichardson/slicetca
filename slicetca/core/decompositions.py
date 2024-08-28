@@ -117,9 +117,9 @@ class PartitionTCA(pl.LightningModule):
             X = as_masked_tensor(X, mask)
             X_hat = as_masked_tensor(X_hat, mask)
 
-        X -= X.mean(axis)
-        X_hat -= X_hat.mean(axis)
-        return 1 - (X - X_hat).pow(2).sum(axis) / X.pow(2).sum(axis)
+        X -= X.mean(dim=axis)
+        X_hat -= X_hat.mean(dim=axis)
+        return (X - X_hat).pow(2).sum(axis) / X.pow(2).sum(axis)
 
     def error(self, X, mask=None, axis=None):
         X_hat = self.construct()

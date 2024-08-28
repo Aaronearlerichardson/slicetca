@@ -108,6 +108,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                          limit_train_batches=batch_num,
                          enable_progress_bar=progress_bar,
                          enable_model_summary=detect_anomaly,
+                         enable_checkpointing=False,
                          callbacks=cb, profiler=profiler,
                          detect_anomaly=detect_anomaly)
 
