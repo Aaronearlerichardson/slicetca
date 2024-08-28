@@ -65,6 +65,16 @@ def generate_square_wave_tensor(*dims):
     return tensor
 
 
+def generate_orthogonal_tensor(*dims, positive=False):
+    tensor = torch.empty(dims, dtype=torch.float64)
+    if not positive:
+        torch.nn.init.orthogonal_(tensor)
+    else:
+        torch.nn.init.orthogonal_(tensor, gain=0.5)
+        tensor += 0.5
+    return tensor
+
+
 def subselect(coo_tensor: torch.sparse_coo_tensor, mask: torch.Tensor):
     """
     Subselects a sparse tensor based on a mask. The mask should be a boolean

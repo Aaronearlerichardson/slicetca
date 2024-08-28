@@ -21,6 +21,7 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
                 processes_sample: int = 1,
                 processes_grid: int = 1,
                 seed: int = 7,
+                verbose: int = 0,
                 **kwargs):
     """
     Performs a gridsearch over different number of components (ranks) to see which has the lowest cross-validated loss.
@@ -58,7 +59,7 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
           '- Number of models to fit:', torch.tensor(grid).size()[0]*sample_size)
 
     dec = partial(decompose_mp_sample, data=data, mask_train=mask_train, mask_test=mask_test, sample_size=sample_size,
-                  processes_sample=processes_sample, **kwargs)
+                  processes_sample=processes_sample, verbose=verbose, **kwargs)
     out_grid = []
     if processes_grid == 1:
         for i in tqdm(range(torch.tensor(grid).size()[0]), desc='Number of components (completed): - '):
@@ -82,7 +83,8 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
     return loss_grid, seed_grid
 
 
-def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sample_size, processes_sample, **kwargs):
+def decompose_mp_sample(number_components_seed, data, mask_train, mask_test,
+                        sample_size, processes_sample, verbose, **kwargs):
 
     number_components = number_components_seed[:-1]
     seed = number_components_seed[-1]
@@ -93,6 +95,7 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
                   data=data.clone(),
                   mask_train=(mask_train.clone() if mask_train is not None else None),
                   mask_test=(mask_test.clone() if mask_test is not None else None),
+                  verbose=verbose,
                   **kwargs)
 
     sample = number_components[np.newaxis].repeat(sample_size, 0)
@@ -102,24 +105,27 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test, sam
     if processes_sample == 1:
         loss = np.array([dec(s) for s in sample])
     else:
-        with Pool(max_workers=processes_sample) as pool: loss = np.array(list(pool.map(dec, sample)))
+        with Pool(max_workers=processes_sample) as pool:
+            loss = np.array(list(pool.map(dec, sample)))
 
     return loss, seeds
 
 
-def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **kwargs):
+def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
+                 *args, **kwargs):
 
     number_components, seed = number_components_seed[:-1], number_components_seed[-1]
+    loss_function = kwargs.pop('loss_function',
+                               torch.nn.MSELoss(reduction='sum'))
 
     if (number_components == np.zeros_like(number_components)).all():
         data_hat = 0
     else:
-        loss_function = kwargs.pop('loss_function', torch.nn.MSELoss(reduction='none'))
-        _, model = decompose(data, number_components, mask=mask_train, verbose=False, progress_bar=False, *args,
+        progress_bar = False if verbose == 0 else True
+        _, model = decompose(data, number_components, mask=mask_train,
+                             verbose=verbose, progress_bar=progress_bar, *args,
                              seed=seed,loss_function=loss_function, **kwargs)
         data_hat = model.construct()
-
-    loss_function = kwargs.pop('loss_function', torch.nn.MSELoss(reduction='none'))
 
     if mask_test is not None and data.is_sparse:
         data = data.to_dense()[mask_test]
@@ -132,7 +138,8 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, *args, **k
         else:
             raise ValueError('Mask test shape does not match data shape.')
 
-    loss = loss_function(data, data_hat)
+    n = data.nbytes / data.itemsize
+    loss = loss_function(data, data_hat) / n
     if torch.is_tensor(loss): loss = torch.mean(loss).item()
 
     return loss

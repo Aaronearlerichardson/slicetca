@@ -58,7 +58,7 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if loss_function is None:
         if data.dtype != torch.long:
-            loss_function = torch.nn.MSELoss(reduction='none')
+            loss_function = torch.nn.MSELoss(reduction='sum')
         else:
             spikes_factorial = torch.tensor(scipy.special.factorial(
                 data.numpy(force=True)), device=data.device)
@@ -78,12 +78,8 @@ def decompose(data: Union[torch.Tensor, np.array],
                           initialization, dtype=data.dtype, lr=learning_rate,
                           weight_decay=weight_decay, loss=loss_function,
                           init_bias=init_bias)
+    # model = torch.compile(model)
 
-    early_stop_callback = EarlyStopping(monitor="train_loss",
-                                        min_delta=min_std,
-                                        patience=iter_std, verbose=verbose,
-                                        mode="min", check_on_train_epoch_end=True)
-    cb = [early_stop_callback]
     if verbose==0:
         profiler = None
         detect_anomaly = False
@@ -99,10 +95,19 @@ def decompose(data: Union[torch.Tensor, np.array],
     else:
         raise ValueError("verbose must be 0, 1, 2, or 3")
 
+    early_stop_callback = EarlyStopping(monitor="train_loss",
+                                        min_delta=min_std,
+                                        patience=iter_std,
+                                        verbose=False,
+                                        mode="min",
+                                        check_on_train_epoch_end=True)
+    cb = [early_stop_callback]
+
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     trainer = pl.Trainer(max_epochs=max_iter, min_epochs=0,
                          limit_train_batches=batch_num,
                          enable_progress_bar=progress_bar,
+                         enable_model_summary=detect_anomaly,
                          callbacks=cb, profiler=profiler,
                          detect_anomaly=detect_anomaly)
 

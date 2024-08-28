@@ -5,8 +5,9 @@ import numpy as np
 from collections.abc import Iterable
 
 from typing import Any, Sequence, Union, Callable
-from slicetca.core.helper_functions import generate_square_wave_tensor
+from slicetca.core.helper_functions import generate_orthogonal_tensor
 import pytorch_lightning as pl
+from torch.masked import masked_tensor, as_masked_tensor
 
 
 class PartitionTCA(pl.LightningModule):
@@ -44,8 +45,8 @@ class PartitionTCA(pl.LightningModule):
         components = [[[dimensions[k] for k in j] for j in i] for i in partitions]
 
         if init_weight is None:
-            if initialization in ['normal', 'uniform', 'steps'] : init_weight = 1/np.sqrt(sum(ranks))
-            elif initialization == 'uniform-positive': init_weight = ((0.5 / sum(ranks)) ** (1 / max([len(p) for p in partitions])))*2
+            if initialization in ['normal', 'uniform'] : init_weight = 1/np.sqrt(sum(ranks))
+            elif initialization in ['uniform-positive', 'orthogonal'] : init_weight = ((0.5 / sum(ranks)) ** (1 / max([len(p) for p in partitions])))*2
             else: raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
         if isinstance(positive, bool):
@@ -67,8 +68,8 @@ class PartitionTCA(pl.LightningModule):
                 v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
                 v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
-            elif initialization == 'steps':
-                v = [nn.Parameter(positive_function[i][j](generate_square_wave_tensor(*([r] + d))*init_weight + init_bias)) for j, d in enumerate(dim)]
+            elif initialization == 'orthogonal':
+                v = [nn.Parameter(positive_function[i][j](generate_orthogonal_tensor(*([r] + d), positive=True)*init_weight + init_bias)) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -109,6 +110,24 @@ class PartitionTCA(pl.LightningModule):
 
     def identity(self, x):
         return x
+
+    def explained_variance(self, X, mask=None, axis=None):
+        X_hat = self.construct()
+        if mask is not None:
+            X = as_masked_tensor(X, mask)
+            X_hat = as_masked_tensor(X_hat, mask)
+
+        X -= X.mean(axis)
+        X_hat -= X_hat.mean(axis)
+        return 1 - (X - X_hat).pow(2).sum(axis) / X.pow(2).sum(axis)
+
+    def error(self, X, mask=None, axis=None):
+        X_hat = self.construct()
+        if mask is not None:
+            X = as_masked_tensor(X, mask)
+            X_hat = as_masked_tensor(X_hat, mask)
+
+        return (X - X_hat).abs().mean(axis)
 
     def set_einsums(self):
 
@@ -217,18 +236,14 @@ class PartitionTCA(pl.LightningModule):
         X *= mask
         X_hat = self.construct()
         X_hat *= mask
-        loss = self.loss(X, X_hat).sum(dtype=torch.float64) / mask.sum(dtype=torch.int64)
+        mask_id = mask.data_ptr()
+        if mask_id not in self._cache.keys():
+            self._cache[mask_id] = mask.sum(dtype=torch.int64)
+        loss = self.loss(X, X_hat) / self._cache[mask_id]
         self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
         return loss
-
-    # def on_train_epoch_end(self):
-    #     # do something with all training_step outputs, for example:
-    #     start_idx = self.trainer.num_training_batches * self.current_epoch
-    #     epoch_mean = torch.as_tensor(self.losses[start_idx:]).mean()
-    #     # pl_module.log("training_mean", epoch_mean.item(), prog_bar=True)
-    #     super().on_train_epoch_end()
 
     def configure_optimizers(self):
         if self._weight_decay is None:
@@ -236,8 +251,52 @@ class PartitionTCA(pl.LightningModule):
         else:
             optimizer = torch.optim.AdamW(self.parameters(), lr=self._lr,
                                           weight_decay=self._weight_decay)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=5, threshold=1e-5)
+        lr_scheduler_config = {
+            # REQUIRED: The scheduler instance
+            "scheduler": lr_scheduler,
+            # The unit of the scheduler's step size, could also be 'step'.
+            # 'epoch' updates the scheduler on epoch end whereas 'step'
+            # updates it after a optimizer update.
+            "interval": 'step',
+            # How many epochs/steps should pass between calls to
+            # `scheduler.step()`. 1 corresponds to updating the learning
+            # rate after every epoch/step.
+            "frequency": 1,
+            # Metric to to monitor for schedulers like `ReduceLROnPlateau`
+            "monitor": "train_loss",
+            # If set to `True`, will enforce that the value specified 'monitor'
+            # is available when the scheduler is updated, thus stopping
+            # training if not found. If set to `False`, it will only produce a warning
+            "strict": True,
+            # If using the `LearningRateMonitor` callback to monitor the
+            # learning rate progress, this keyword can be used to specify
+            # a custom logged name
+            "name": None,
+        }
         super().configure_optimizers()
-        return optimizer
+        return {
+                "optimizer": optimizer,
+                "lr_scheduler": lr_scheduler_config,
+                }
+
+    def copy(self):
+        """
+        Returns a copy of the model.
+        """
+        out = self.__class__(dimensions=self.dimensions,
+                              ranks=self.ranks,
+                              positive=self.positive,
+                              initialization=self.initialization,
+                              lr=self._lr,
+                              weight_decay=self._weight_decay,
+                              init_weight=self.init_weight,
+                              init_bias=self.init_bias,
+                              dtype=self.dtype,
+                              loss=self.loss)
+        out.set_components(self.get_components())
+        return out
 
 
 class SliceTCA(PartitionTCA):
@@ -285,7 +344,7 @@ class SliceTCA(PartitionTCA):
 class TCA(PartitionTCA):
     def __init__(self,
                  dimensions: Sequence[int],
-                 rank: int,
+                 ranks: int,
                  positive: bool = False,
                  initialization: str = 'uniform',
                  lr: float = 5 * 10 ** -3,
@@ -298,7 +357,7 @@ class TCA(PartitionTCA):
         Main TCA decomposition class.
 
         :param dimensions: Dimensions of the data to decompose.
-        :param rank: Number of components.
+        :param ranks: Number of components.
         :param positive: If False does nothing.
                          If True constrains all components to be positive.
                          If list of list, the list of functions to apply to a given partition and component.
@@ -308,14 +367,14 @@ class TCA(PartitionTCA):
         :param device: Torch device.
         """
 
-        if not isinstance(rank, Iterable):
-            rank = (rank,)
+        if not isinstance(ranks, Iterable):
+            rank = (ranks,)
 
         valence = len(dimensions)
         partitions = [[[j] for j in range(valence)]]
 
         super().__init__(dimensions=dimensions,
-                         ranks=rank,
+                         ranks=ranks,
                          partitions=partitions,
                          positive=positive,
                          initialization=initialization,

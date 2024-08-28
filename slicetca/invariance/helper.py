@@ -50,12 +50,16 @@ def construct_per_component(model: SliceTCA, components: Sequence[Sequence[torch
     :return: Reconstructed tensor.
     """
 
-    temp = []
+    temp = [torch.zeros(model.dimensions).to(model.device)
+            for i in range(len(components))
+            for j in range(model.ranks[i])]
 
+    counter = 0
     for i in range(len(components)):
         for j in range(model.ranks[i]):
-            temp.append(construct_single_component(
-                model, components, i, j).to(model.device))
+            temp[counter] += construct_single_component(model, components, i, j)
+            counter += 1
+
     return temp
 
 
