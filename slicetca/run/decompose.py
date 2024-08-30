@@ -115,7 +115,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     if mask is None:
         mask = torch.ones_like(data, dtype=torch.bool)
     data[~mask] = 0
-    trainer.fit(model, _feed(data, mask, batch_dim))
+    trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
     return model.get_components(numpy=True), model
 

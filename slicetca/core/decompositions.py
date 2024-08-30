@@ -233,13 +233,13 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        X *= mask
+        # X *= mask
         X_hat = self.construct()
-        X_hat *= mask
-        mask_id = mask.data_ptr()
-        if mask_id not in self._cache.keys():
-            self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X, X_hat) / self._cache[mask_id]
+        # X_hat *= mask
+        # mask_id = mask.data_ptr()
+        # if mask_id not in self._cache.keys():
+        #     self._cache[mask_id] = mask.sum(dtype=torch.int64)
+        loss = self.loss(X[mask], X_hat[mask]) # / self._cache[mask_id]
         self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
