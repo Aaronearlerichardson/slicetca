@@ -54,8 +54,9 @@ class PartitionTCA(pl.LightningModule):
             else: positive_function = [[self.identity for j in i] for i in partitions]
         elif isinstance(positive, tuple) or isinstance(positive, list): positive_function = positive
 
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         vectors = nn.ModuleList([])
-
+        self.to(dtype=dtype, device=device)
         init_params = dict(device=self.device, dtype=dtype)
         for i in range(len(ranks)):
             r = ranks[i]
@@ -69,7 +70,7 @@ class PartitionTCA(pl.LightningModule):
             elif initialization == 'uniform-positive':
                 v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'orthogonal':
-                v = [nn.Parameter(positive_function[i][j](generate_orthogonal_tensor(*([r] + d), positive=True)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function[i][j](generate_orthogonal_tensor(*([r] + d), positive=True, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -84,7 +85,6 @@ class PartitionTCA(pl.LightningModule):
         self.initialization = initialization
         self.init_weight = init_weight
         self.init_bias = init_bias
-        self.to(dtype)
 
         self.components = components
         self.positive_function = positive_function

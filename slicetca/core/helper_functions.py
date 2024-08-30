@@ -65,8 +65,8 @@ def generate_square_wave_tensor(*dims):
     return tensor
 
 
-def generate_orthogonal_tensor(*dims, positive=False):
-    tensor = torch.empty(dims, dtype=torch.float64)
+def generate_orthogonal_tensor(*dims, positive=False, **kwargs):
+    tensor = torch.empty(dims, **kwargs)
     if not positive:
         torch.nn.init.orthogonal_(tensor)
     else:

@@ -8,7 +8,6 @@ import scipy
 from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
-from ieeg.calc.fast import mixup
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -73,13 +72,13 @@ def decompose(data: Union[torch.Tensor, np.array],
     if isinstance(number_components, int): decomposition = TCA
     elif len(number_components) == 1: decomposition = TCA
     else: decomposition = SliceTCA
+    # if data.device.type == 'cuda': decomposition = decomposition.cuda()
 
     model = decomposition(dimensions, number_components, positive,
                           initialization, dtype=data.dtype, lr=learning_rate,
                           weight_decay=weight_decay, loss=loss_function,
                           init_bias=init_bias)
     # model = torch.compile(model)
-
     if verbose==0:
         profiler = None
         detect_anomaly = False
@@ -105,6 +104,7 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     trainer = pl.Trainer(max_epochs=max_iter, min_epochs=0,
+                         accelerator=model.device.type,
                          limit_train_batches=batch_num,
                          enable_progress_bar=progress_bar,
                          enable_model_summary=detect_anomaly,
@@ -115,8 +115,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     if mask is None:
         mask = torch.ones_like(data, dtype=torch.bool)
     data[~mask] = 0
-    for i in range(batch_prop_decay):
-        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
+    trainer.fit(model, _feed(data, mask, batch_dim))
 
     return model.get_components(numpy=True), model
 
@@ -124,10 +123,11 @@ def decompose(data: Union[torch.Tensor, np.array],
 def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
     assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
     assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
-    rand_gen = torch.distributions.uniform.Uniform(0, 1)
+    dist = torch.empty_like(data)
     while True:
         if batch_prop < 1.0:
-            batch = rand_gen.sample(mask.shape) < batch_prop
+            torch.nn.init.uniform_(dist, 0, 1)
+            batch = dist < batch_prop
             mask_out = mask & batch
         else:
             mask_out = mask

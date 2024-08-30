@@ -83,7 +83,8 @@ def within_invariance(model: PartitionTCA,
                    iter_std: int = 100,
                    verbose: bool = False,
                    progress_bar: bool = True,
-                   maximize: bool = False):
+                   maximize: bool = False,
+                        ignore: tuple = ()):
     """
     Enables optimizing the components w.r.t. some objective function while fixing the overall reconstructed tensor.
 
@@ -119,7 +120,8 @@ def within_invariance(model: PartitionTCA,
 
         components_transformed = transformation(copy.deepcopy(components))
 
-        components_transformed_constructed = construct_per_component(model, components_transformed)
+        components_transformed_constructed = construct_per_component(model, components_transformed, ignore)
+        # T, W, H =
         l = objective_function(components_transformed_constructed)
 
         if verbose: print('Iteration:', iteration, '\tloss:', l.item())
