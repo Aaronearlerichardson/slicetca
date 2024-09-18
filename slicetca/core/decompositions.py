@@ -234,16 +234,34 @@ class PartitionTCA(pl.LightningModule):
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
         # X *= mask
+        X = self.trial_average(X, mask, 0)
         X_hat = self.construct()
         # X_hat *= mask
+        X_hat = self.trial_average(X_hat, mask, 0)
         # mask_id = mask.data_ptr()
         # if mask_id not in self._cache.keys():
         #     self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X[mask], X_hat[mask]) # / self._cache[mask_id]
+        loss = self.loss(X, X_hat) # / self._cache[mask_id]
         self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
         return loss
+
+    def trial_average(self, X, mask=None, axis=None):
+
+        if mask is None:
+            mask = torch.ones_like(X, dtype=torch.bool, device=self.device)
+        # Apply the mask to the matrix X
+        masked_X = X * mask
+
+        # Calculate the sum of the masked elements for each column
+        sum_masked_X = masked_X.sum(dim=axis)
+
+        # Calculate the count of the non-masked elements for each column
+        count_non_masked = mask.sum(dim=axis)
+
+        # Compute the mean by dividing the sum by the count for each column
+        return sum_masked_X / count_non_masked
 
     def configure_optimizers(self):
         if self._weight_decay is None:
