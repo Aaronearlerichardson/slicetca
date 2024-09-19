@@ -135,7 +135,8 @@ def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
             mask_out = mask
 
         if batch_dim is None:
-            yield data, mask_out
+            if mask_out.any():
+                yield data, mask_out
         else:
             for i in range(data.shape[batch_dim]):
                 idx = [slice(None) if j != batch_dim else i

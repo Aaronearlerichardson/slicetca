@@ -126,6 +126,8 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
                              verbose=verbose, progress_bar=progress_bar, *args,
                              seed=seed,loss_function=loss_function, **kwargs)
         data_hat = model.construct()
+        if data_hat.device != data.device:
+            data_hat = data_hat.to(data.device)
 
     if mask_test is not None and data.is_sparse:
         data = data.to_dense()[mask_test]
