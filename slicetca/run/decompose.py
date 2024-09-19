@@ -115,6 +115,8 @@ def decompose(data: Union[torch.Tensor, np.array],
     if mask is None:
         mask = torch.ones_like(data, dtype=torch.bool)
     data[~mask] = 0
+    # for i in range(batch_prop_decay):
+    #     trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
     trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
     return model.get_components(numpy=True), model

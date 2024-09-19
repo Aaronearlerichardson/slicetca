@@ -10,6 +10,45 @@ import pytorch_lightning as pl
 from torch.masked import masked_tensor, as_masked_tensor
 
 
+def trial_average(X, mask=None, axis=None):
+    if mask is None:
+        mask = torch.ones_like(X, dtype=torch.bool)
+    # Apply the mask to the matrix X
+    masked_X = X * mask
+
+    # Calculate the sum of the masked elements for each column
+    sum_masked_X = masked_X.sum(dim=axis)
+
+    # Calculate the count of the non-masked elements for each column
+    count_non_masked = mask.sum(dim=axis)
+
+    # Compute the mean by dividing the sum by the count for each column
+    return sum_masked_X / count_non_masked
+
+
+def explained_variance(X, X_hat, mask=None, axis=None):
+    if mask is None:
+        mask = torch.ones_like(X, dtype=torch.bool)
+    masked_X = X * mask
+    masked_X_hat = X_hat * mask
+    count_non_masked = mask.sum(dim=axis)
+    X_centered = X - masked_X.sum(dim=axis) / count_non_masked
+    X_hat_centered = X_hat - masked_X_hat.sum(dim=axis) / count_non_masked
+    masked_X_centered = X_centered * mask
+    masked_X_hat_centered = X_hat_centered * mask
+    diff = masked_X_centered - masked_X_hat_centered
+    return diff.pow(2).sum(dim=axis) / masked_X_centered.pow(2).sum(dim=axis)
+
+
+def error(X, X_hat, mask=None, axis=None):
+    if mask is None:
+        mask = torch.ones_like(X, dtype=torch.bool)
+    diff = X - X_hat
+    diff_masked = diff * mask
+    count_non_masked = mask.sum(dim=axis)
+    return diff_masked.abs().sum(axis) / count_non_masked
+
+
 class PartitionTCA(pl.LightningModule):
 
     def __init__(self,
@@ -112,22 +151,10 @@ class PartitionTCA(pl.LightningModule):
         return x
 
     def explained_variance(self, X, mask=None, axis=None):
-        X_hat = self.construct()
-        if mask is not None:
-            X = as_masked_tensor(X, mask)
-            X_hat = as_masked_tensor(X_hat, mask)
-
-        X -= X.mean(dim=axis)
-        X_hat -= X_hat.mean(dim=axis)
-        return (X - X_hat).pow(2).sum(axis) / X.pow(2).sum(axis)
+        return explained_variance(X, self.construct(), mask, axis)
 
     def error(self, X, mask=None, axis=None):
-        X_hat = self.construct()
-        if mask is not None:
-            X = as_masked_tensor(X, mask)
-            X_hat = as_masked_tensor(X_hat, mask)
-
-        return (X - X_hat).abs().mean(axis)
+        return error(X, self.construct(), mask, axis)
 
     def set_einsums(self):
 
@@ -234,34 +261,18 @@ class PartitionTCA(pl.LightningModule):
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
         # X *= mask
-        X = self.trial_average(X, mask, 0)
+        X_avg = trial_average(X, mask, 0)
         X_hat = self.construct()
         # X_hat *= mask
-        X_hat = self.trial_average(X_hat, mask, 0)
+        X_hat_avg = trial_average(X_hat, mask, 0)
         # mask_id = mask.data_ptr()
         # if mask_id not in self._cache.keys():
         #     self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X, X_hat) # / self._cache[mask_id]
+        loss = self.loss(X_avg, X_hat_avg)
         self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
         return loss
-
-    def trial_average(self, X, mask=None, axis=None):
-
-        if mask is None:
-            mask = torch.ones_like(X, dtype=torch.bool, device=self.device)
-        # Apply the mask to the matrix X
-        masked_X = X * mask
-
-        # Calculate the sum of the masked elements for each column
-        sum_masked_X = masked_X.sum(dim=axis)
-
-        # Calculate the count of the non-masked elements for each column
-        count_non_masked = mask.sum(dim=axis)
-
-        # Compute the mean by dividing the sum by the count for each column
-        return sum_masked_X / count_non_masked
 
     def configure_optimizers(self):
         if self._weight_decay is None:
