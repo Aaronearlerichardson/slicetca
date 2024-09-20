@@ -17,7 +17,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               learning_rate: float = 5*10**-3,
               batch_dim: int = None,
               max_iter: int = 10000,
-              min_std: float = 10**-5,
+              min_std: float = None,
               iter_std: int = 100,
               mask: torch.Tensor = None,
               progress_bar: bool = True,
@@ -77,7 +77,8 @@ def decompose(data: Union[torch.Tensor, np.array],
     model = decomposition(dimensions, number_components, positive,
                           initialization, dtype=data.dtype, lr=learning_rate,
                           weight_decay=weight_decay, loss=loss_function,
-                          init_bias=init_bias)
+                          init_bias=init_bias, threshold=min_std * 2,
+                          patience=iter_std // 2)
     # model = torch.compile(model)
     if verbose==0:
         profiler = None
@@ -94,13 +95,16 @@ def decompose(data: Union[torch.Tensor, np.array],
     else:
         raise ValueError("verbose must be 0, 1, 2, or 3")
 
-    early_stop_callback = EarlyStopping(monitor="train_loss",
-                                        min_delta=min_std,
-                                        patience=iter_std,
-                                        verbose=False,
-                                        mode="min",
-                                        check_on_train_epoch_end=True)
-    cb = [early_stop_callback]
+    if min_std is not None:
+        early_stop_callback = EarlyStopping(monitor="train_loss",
+                                            min_delta=min_std,
+                                            patience=iter_std,
+                                            verbose=False,
+                                            mode="min",
+                                            check_on_train_epoch_end=True)
+        cb = [early_stop_callback]
+    else:
+        cb = None
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
 
@@ -136,7 +140,7 @@ def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
             mask_out = mask
 
         if batch_dim is None:
-            if mask_out.any(0).all():
+            if mask_out.any():
                 yield data, mask_out
         else:
             for i in range(data.shape[batch_dim]):

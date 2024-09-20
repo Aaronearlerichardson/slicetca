@@ -62,7 +62,9 @@ class PartitionTCA(pl.LightningModule):
                  init_weight: float = None,
                  init_bias: float = 0.0,
                  dtype: torch.dtype = torch.float64,
-                 loss: callable = nn.MSELoss(reduction='none')):
+                 loss: callable = nn.MSELoss(reduction='none'),
+                 threshold: float = None,
+                 patience: int = 10):
         """
         Parent class for the sliceTCA and TCA decompositions.
 
@@ -133,6 +135,8 @@ class PartitionTCA(pl.LightningModule):
         self.losses = []
         self._lr = lr
         self._weight_decay = weight_decay
+        self._threshold = threshold
+        self._patience = patience
         self._cache = {}
 
         self.inverse_permutations = []
@@ -260,15 +264,15 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        # X *= mask
-        X_avg = trial_average(X, mask, 0)
+        X_mask = X * mask
+        # X_avg = trial_average(X, mask, 0)
         X_hat = self.construct()
-        # X_hat *= mask
-        X_hat_avg = trial_average(X_hat, mask, 0)
-        # mask_id = mask.data_ptr()
-        # if mask_id not in self._cache.keys():
-        #     self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X_avg, X_hat_avg)
+        X_hat_mask = X_hat * mask
+        # X_hat_avg = trial_average(X_hat, mask, 0)
+        mask_id = mask.data_ptr()
+        if mask_id not in self._cache.keys():
+            self._cache[mask_id] = mask.sum(dtype=torch.int64)
+        loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
         self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
@@ -281,7 +285,8 @@ class PartitionTCA(pl.LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=self._lr,
                                           weight_decay=self._weight_decay)
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, threshold=1e-5)
+            optimizer, mode='min', factor=0.5,
+            patience=self._patience, threshold=self._threshold)
         lr_scheduler_config = {
             # REQUIRED: The scheduler instance
             "scheduler": lr_scheduler,
@@ -339,7 +344,9 @@ class SliceTCA(PartitionTCA):
                  init_weight: float = None,
                  init_bias: float = 0.0,
                  dtype: torch.dtype = torch.float64,
-                 loss: callable = nn.MSELoss(reduction='none')):
+                 loss: callable = nn.MSELoss(),
+                 threshold: float = None,
+                 patience: int = 10):
         """
         Main sliceTCA decomposition class.
 
@@ -367,7 +374,9 @@ class SliceTCA(PartitionTCA):
                          init_weight=init_weight,
                          init_bias=init_bias,
                          dtype=dtype,
-                         loss=loss)
+                         loss=loss,
+                         threshold=threshold,
+                         patience=patience)
 
 
 class TCA(PartitionTCA):
@@ -381,7 +390,9 @@ class TCA(PartitionTCA):
                  init_weight: float = None,
                  init_bias: float = 0.0,
                  dtype: torch.dtype = torch.float64,
-                 loss: callable = nn.MSELoss(reduction='none')):
+                 loss: callable = nn.MSELoss(),
+                 threshold: float = None,
+                 patience: int = 10):
         """
         Main TCA decomposition class.
 
@@ -412,4 +423,6 @@ class TCA(PartitionTCA):
                          init_weight=init_weight,
                          init_bias=init_bias,
                          dtype=dtype,
-                         loss=loss)
+                         loss=loss,
+                         threshold=threshold,
+                         patience=patience)
