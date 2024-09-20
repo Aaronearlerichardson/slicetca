@@ -24,7 +24,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               seed: int = 7,
               weight_decay: float = None,
               batch_prop_decay: int = 1,
-              batch_prop = 0.2,
+              batch_prop: float = 0.2,
               init_bias: float = 0.,
               loss_function: callable = None,
               verbose: int = 0) -> (list, Union[SliceTCA, TCA]):
@@ -103,7 +103,12 @@ def decompose(data: Union[torch.Tensor, np.array],
     cb = [early_stop_callback]
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=0,
+
+    if mask is None:
+        mask = torch.ones_like(data, dtype=torch.bool)
+    data[~mask] = 0
+
+    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=100,
                          accelerator=model.device.type,
                          limit_train_batches=batch_num,
                          enable_progress_bar=progress_bar,
@@ -111,13 +116,9 @@ def decompose(data: Union[torch.Tensor, np.array],
                          enable_checkpointing=False,
                          callbacks=cb, profiler=profiler,
                          detect_anomaly=detect_anomaly)
-
-    if mask is None:
-        mask = torch.ones_like(data, dtype=torch.bool)
-    data[~mask] = 0
-    # for i in range(batch_prop_decay):
-    #     trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
-    trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
+    for i in range(batch_prop_decay):
+        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
+    # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
     return model.get_components(numpy=True), model
 
@@ -135,7 +136,7 @@ def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
             mask_out = mask
 
         if batch_dim is None:
-            if mask_out.any():
+            if mask_out.any(0).all():
                 yield data, mask_out
         else:
             for i in range(data.shape[batch_dim]):
