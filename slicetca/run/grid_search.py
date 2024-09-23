@@ -141,7 +141,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
             raise ValueError('Mask test shape does not match data shape.')
 
     # n = data.nbytes / data.itemsize
-    loss = loss_function(data, data_hat)# / n
+    loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
     if torch.is_tensor(loss): loss = loss.item()
 
     return loss

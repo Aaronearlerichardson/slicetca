@@ -121,7 +121,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                          callbacks=cb, profiler=profiler,
                          detect_anomaly=detect_anomaly)
     for i in range(batch_prop_decay):
-        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**i))
+        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**(i+1)))
     # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
     return model.get_components(numpy=True), model
