@@ -9,6 +9,7 @@ import scipy
 from functools import partial
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
+from lightning.pytorch import Trainer, seed_everything
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -51,7 +52,8 @@ def decompose(data: Union[torch.Tensor, np.array],
     :return: model: A SliceTCA or TCA model. It can be used to access the losses over training and much more.
     """
 
-    torch.manual_seed(seed)
+    if seed is not None:
+        seed_everything(seed, workers=True)
 
     if isinstance(data, np.ndarray): data = torch.tensor(
         data, device='cuda' if torch.cuda.is_available() else 'cpu')
@@ -129,7 +131,8 @@ def decompose(data: Union[torch.Tensor, np.array],
                          enable_model_summary=detect_anomaly,
                          enable_checkpointing=False,
                          callbacks=cb, profiler=profiler,
-                         detect_anomaly=detect_anomaly)
+                         detect_anomaly=detect_anomaly,
+                         deterministic=True if seed is not None else False)
     for i in range(batch_prop_decay):
         trainer.fit(model,
                     train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** (i + 1)),
