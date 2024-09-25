@@ -1,5 +1,6 @@
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
+from slicetca.run.utils import block_mask
 
 import torch
 from typing import Union, Sequence
@@ -14,7 +15,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               number_components: Union[Sequence[int], int],
               positive: bool = False,
               initialization: str = 'uniform',
-              learning_rate: float = 5*10**-3,
+              learning_rate: float = 5 * 10 ** -3,
               batch_dim: int = None,
               max_iter: int = 10000,
               min_std: float = None,
@@ -69,9 +70,12 @@ def decompose(data: Union[torch.Tensor, np.array],
     if batch_dim is not None:
         dimensions.pop(batch_dim)
 
-    if isinstance(number_components, int): decomposition = TCA
-    elif len(number_components) == 1: decomposition = TCA
-    else: decomposition = SliceTCA
+    if isinstance(number_components, int):
+        decomposition = TCA
+    elif len(number_components) == 1:
+        decomposition = TCA
+    else:
+        decomposition = SliceTCA
     # if data.device.type == 'cuda': decomposition = decomposition.cuda()
 
     model = decomposition(dimensions, number_components, positive,
@@ -80,28 +84,23 @@ def decompose(data: Union[torch.Tensor, np.array],
                           init_bias=init_bias, threshold=min_std * 2,
                           patience=iter_std // 2)
     # model = torch.compile(model)
-    if verbose==0:
+    if verbose == 0:
         profiler = None
         detect_anomaly = False
-    elif verbose==1:
+    elif verbose == 1:
         profiler = "simple"
         detect_anomaly = False
-    elif verbose==2:
+    elif verbose == 2:
         profiler = "advanced"
         detect_anomaly = False
-    elif verbose==3:
+    elif verbose == 3:
         profiler = None
         detect_anomaly = True
     else:
         raise ValueError("verbose must be 0, 1, 2, or 3")
 
     if min_std is not None:
-        early_stop_callback = EarlyStopping(monitor="train_loss",
-                                            min_delta=min_std,
-                                            patience=iter_std,
-                                            verbose=False,
-                                            mode="min",
-                                            check_on_train_epoch_end=True)
+        early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False)
         cb = [early_stop_callback]
     else:
         cb = None
@@ -112,22 +111,35 @@ def decompose(data: Union[torch.Tensor, np.array],
         mask = torch.ones_like(data, dtype=torch.bool)
     data[~mask] = 0
 
-    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=100,
+    train_mask, val_mask = block_mask(dimensions=mask.shape,
+                                      train_blocks_dimensions=(1, 1, 10),
+                                      # Note that the blocks will be of size 2*train_blocks_dimensions + 1
+                                      test_blocks_dimensions=(1, 1, 5),
+                                      # Same, 2*test_blocks_dimensions + 1
+                                      fraction_test=0.25,
+                                      device=data.device.type)
+    train_mask = train_mask & mask
+    val_mask = val_mask & mask
+
+    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=10,
                          accelerator=model.device.type,
                          limit_train_batches=batch_num,
+                         limit_val_batches=batch_num,
                          enable_progress_bar=progress_bar,
                          enable_model_summary=detect_anomaly,
                          enable_checkpointing=False,
                          callbacks=cb, profiler=profiler,
                          detect_anomaly=detect_anomaly)
     for i in range(batch_prop_decay):
-        trainer.fit(model, _feed(data, mask, batch_dim, batch_prop**(i+1)))
+        trainer.fit(model,
+                    train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** (i + 1)),
+                    val_dataloaders=_feed(data, val_mask, batch_dim, 1.0))
     # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
     return model.get_components(numpy=True), model
 
 
-def _feed(data, mask, batch_dim=None, batch_prop = 1.0):
+def _feed(data, mask, batch_dim=None, batch_prop=1.0):
     assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
     assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
     dist = torch.empty_like(data)

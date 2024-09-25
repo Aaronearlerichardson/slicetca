@@ -273,9 +273,23 @@ class PartitionTCA(pl.LightningModule):
         if mask_id not in self._cache.keys():
             self._cache[mask_id] = mask.sum(dtype=torch.int64)
         loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
-        self.losses.append(loss.item())
+        # self.losses.append(loss.item())
         self.log("train_loss", loss, on_step=True,
-                 on_epoch=True, prog_bar=True, logger=True)
+                 on_epoch=False, logger=True)
+        return loss
+
+    def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
+        X, mask = batch
+        X_mask = X * mask
+        X_hat = self.construct()
+        X_hat_mask = X_hat * mask
+        mask_id = mask.data_ptr()
+        if mask_id not in self._cache.keys():
+            self._cache[mask_id] = mask.sum(dtype=torch.int64)
+        loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
+        self.losses.append(loss.item())
+        self.log("val_loss", loss, on_step=True,
+                 on_epoch=False, prog_bar=True, logger=True)
         return loss
 
     def configure_optimizers(self):
@@ -299,7 +313,7 @@ class PartitionTCA(pl.LightningModule):
             # rate after every epoch/step.
             "frequency": 1,
             # Metric to to monitor for schedulers like `ReduceLROnPlateau`
-            "monitor": "train_loss",
+            "monitor": "val_loss",
             # If set to `True`, will enforce that the value specified 'monitor'
             # is available when the scheduler is updated, thus stopping
             # training if not found. If set to `False`, it will only produce a warning
