@@ -289,7 +289,7 @@ class PartitionTCA(pl.LightningModule):
         loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
         self.losses.append(loss.item())
         self.log("val_loss", loss, on_step=True,
-                 on_epoch=False, prog_bar=True, logger=True)
+                 on_epoch=True, prog_bar=False, logger=True)
         return loss
 
     def configure_optimizers(self):
