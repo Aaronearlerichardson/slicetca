@@ -79,12 +79,14 @@ def decompose(data: Union[torch.Tensor, np.array],
     else:
         decomposition = SliceTCA
     # if data.device.type == 'cuda': decomposition = decomposition.cuda()
-
+    if min_std is not None:
+        min_std *= 2
+        iter_std //= 2
     model = decomposition(dimensions, number_components, positive,
                           initialization, dtype=data.dtype, lr=learning_rate,
                           weight_decay=weight_decay, loss=loss_function,
-                          init_bias=init_bias, threshold=min_std * 2,
-                          patience=iter_std // 2)
+                          init_bias=init_bias, threshold=min_std,
+                          patience=iter_std)
     # model = torch.compile(model)
     if verbose == 0:
         profiler = None
@@ -103,9 +105,12 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if min_std is not None:
         early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False)
-        cb = [early_stop_callback]
+        learning_rate_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch', )
+        cb = [early_stop_callback, learning_rate_monitor]
     else:
-        cb = None
+        early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
+        learning_rate_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch', )
+        cb = [early_stop_callback, learning_rate_monitor]
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
 

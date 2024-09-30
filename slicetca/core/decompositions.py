@@ -1,13 +1,12 @@
 import torch
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-from torch import nn
+from torch import nn, optim
 import numpy as np
 from collections.abc import Iterable
 
 from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
 import pytorch_lightning as pl
-from torch.masked import masked_tensor, as_masked_tensor
 
 
 def trial_average(X, mask=None, axis=None):
@@ -37,7 +36,9 @@ def explained_variance(X, X_hat, mask=None, axis=None):
     masked_X_centered = X_centered * mask
     masked_X_hat_centered = X_hat_centered * mask
     diff = masked_X_centered - masked_X_hat_centered
-    return diff.pow(2).sum(dim=axis) / masked_X_centered.pow(2).sum(dim=axis)
+    out = diff.pow(2).sum(dim=axis) / masked_X_centered.pow(2).sum(dim=axis)
+    out[out > 1] = 1 / out[out > 1]
+    return out
 
 
 def error(X, X_hat, mask=None, axis=None):
@@ -273,9 +274,7 @@ class PartitionTCA(pl.LightningModule):
         if mask_id not in self._cache.keys():
             self._cache[mask_id] = mask.sum(dtype=torch.int64)
         loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
-        # self.losses.append(loss.item())
-        self.log("train_loss", loss, on_step=True,
-                 on_epoch=False, logger=True)
+        self.losses.append(loss.item())
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
@@ -287,9 +286,11 @@ class PartitionTCA(pl.LightningModule):
         if mask_id not in self._cache.keys():
             self._cache[mask_id] = mask.sum(dtype=torch.int64)
         loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
-        self.losses.append(loss.item())
-        self.log("val_loss", loss, on_step=True,
-                 on_epoch=True, prog_bar=False, logger=True)
+        to_log = {"val_loss": loss}
+        if len(self.losses) > 0:
+            to_log["train_loss"] = self.losses[-1]
+            self.losses[-1] = loss.item()
+        self.log_dict(to_log, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def configure_optimizers(self):
@@ -298,16 +299,23 @@ class PartitionTCA(pl.LightningModule):
         else:
             optimizer = torch.optim.AdamW(self.parameters(), lr=self._lr,
                                           weight_decay=self._weight_decay)
+        if self._threshold is None:
+            return optimizer
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5,
             patience=self._patience, threshold=self._threshold)
+        # lr_scheduler = CosineWarmupScheduler(optimizer, self._patience,
+        #                                      self.trainer.max_epochs)
+        # lr_scheduler = torch.optim.swa_utils.SWALR(
+        #     optimizer, anneal_strategy = "cos",
+        #     anneal_epochs = self._patience, swa_lr = self._threshold)
         lr_scheduler_config = {
             # REQUIRED: The scheduler instance
             "scheduler": lr_scheduler,
             # The unit of the scheduler's step size, could also be 'step'.
             # 'epoch' updates the scheduler on epoch end whereas 'step'
             # updates it after a optimizer update.
-            "interval": 'step',
+            "interval": 'epoch',
             # How many epochs/steps should pass between calls to
             # `scheduler.step()`. 1 corresponds to updating the learning
             # rate after every epoch/step.
@@ -321,7 +329,7 @@ class PartitionTCA(pl.LightningModule):
             # If using the `LearningRateMonitor` callback to monitor the
             # learning rate progress, this keyword can be used to specify
             # a custom logged name
-            "name": None,
+            "name": "learning_rate",
         }
         super().configure_optimizers()
         return {
@@ -440,3 +448,20 @@ class TCA(PartitionTCA):
                          loss=loss,
                          threshold=threshold,
                          patience=patience)
+
+
+class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, warmup, max_iters):
+        self.warmup = warmup
+        self.max_num_iters = max_iters
+        super().__init__(optimizer)
+
+    def get_lr(self):
+        lr_factor = self.get_lr_factor(epoch=self.last_epoch)
+        return [base_lr * lr_factor for base_lr in self.base_lrs]
+
+    def get_lr_factor(self, epoch):
+        lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
+        if epoch <= self.warmup:
+            lr_factor *= epoch * 1.0 / self.warmup
+        return lr_factor
