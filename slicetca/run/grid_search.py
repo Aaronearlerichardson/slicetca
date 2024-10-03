@@ -134,20 +134,23 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
         data = data.to_dense()[mask_test]
         loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
     elif mask_test is not None:
-        data = data[mask_test]
+        data_mask = data[mask_test]
         if isinstance(data_hat, int):
-            return torch.mean(data).item()
+            return torch.mean(data_mask).item()
         elif data_hat.shape == mask_test.shape:
             data_hat = data_hat[mask_test]
         else:
             raise ValueError('Mask test shape does not match data shape.')
-        loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
+        loss = loss_function(data_mask, data_hat) / mask_test.sum(dtype=torch.int64)
     else:
         loss = model.losses[-1]
 
     if torch.is_tensor(loss): loss = loss.item()
 
-    return loss
+    # combine mask_train and mask_test
+    mask = mask_test | mask_train if mask_test is not None else mask_train
+
+    return loss / model.explained_variance(data).item()
 
 
 def get_grid_sample(min_dims, max_dims):

@@ -57,6 +57,10 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if isinstance(data, np.ndarray): data = torch.tensor(
         data, device='cuda' if torch.cuda.is_available() else 'cpu')
+    elif not isinstance(data, torch.Tensor):
+        raise ValueError("data must be a torch.Tensor or a numpy.ndarray")
+    else:
+        data = data.to('cuda' if torch.cuda.is_available() else 'cpu', copy=True)
 
     if loss_function is None:
         if data.dtype != torch.long:

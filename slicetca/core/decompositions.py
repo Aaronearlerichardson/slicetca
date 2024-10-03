@@ -27,7 +27,7 @@ def trial_average(X, mask=None, axis=None):
 
 def explained_variance(X, X_hat, mask=None, axis=None):
     if mask is None:
-        mask = torch.ones_like(X, dtype=torch.bool)
+        mask = torch.ones_like(X, dtype=torch.bool, device=X.device)
     masked_X = X * mask
     masked_X_hat = X_hat * mask
     count_non_masked = mask.sum(dim=axis)
@@ -156,7 +156,10 @@ class PartitionTCA(pl.LightningModule):
         return x
 
     def explained_variance(self, X, mask=None, axis=None):
-        return explained_variance(X, self.construct(), mask, axis)
+        x_hat = self.construct()
+        if X.device != x_hat.device:
+            x_hat = x_hat.to(X.device)
+        return explained_variance(X, x_hat, mask, axis)
 
     def error(self, X, mask=None, axis=None):
         return error(X, self.construct(), mask, axis)
