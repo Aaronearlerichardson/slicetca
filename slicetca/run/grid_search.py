@@ -147,10 +147,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
 
     if torch.is_tensor(loss): loss = loss.item()
 
-    # combine mask_train and mask_test
-    mask = mask_test | mask_train if mask_test is not None else mask_train
-
-    return loss / model.explained_variance(data, mask).item()
+    return loss
 
 
 def get_grid_sample(min_dims, max_dims):
