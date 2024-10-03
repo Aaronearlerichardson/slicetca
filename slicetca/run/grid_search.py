@@ -103,7 +103,8 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test,
 
     sample = np.concatenate([sample, seeds[:,np.newaxis]], axis=-1)
     if processes_sample == 1:
-        loss = np.array([dec(s) for s in sample])
+        out = [dec(s) for s in sample]
+        loss = np.array(out)
     else:
         with Pool(max_workers=processes_sample) as pool:
             loss = np.array(list(pool.map(dec, sample)))
@@ -131,6 +132,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
 
     if mask_test is not None and data.is_sparse:
         data = data.to_dense()[mask_test]
+        loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
     elif mask_test is not None:
         data = data[mask_test]
         if isinstance(data_hat, int):
@@ -139,9 +141,10 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
             data_hat = data_hat[mask_test]
         else:
             raise ValueError('Mask test shape does not match data shape.')
+        loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
+    else:
+        loss = model.losses[-1]
 
-    # n = data.nbytes / data.itemsize
-    loss = loss_function(data, data_hat) / mask_test.sum(dtype=torch.int64)
     if torch.is_tensor(loss): loss = loss.item()
 
     return loss
