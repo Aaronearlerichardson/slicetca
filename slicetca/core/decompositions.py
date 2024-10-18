@@ -96,10 +96,9 @@ class PartitionTCA(pl.LightningModule):
             else: positive_function = [[self.identity for j in i] for i in partitions]
         elif isinstance(positive, tuple) or isinstance(positive, list): positive_function = positive
 
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         vectors = nn.ModuleList([])
-        self.to(dtype=dtype, device=device)
         init_params = dict(device=self.device, dtype=dtype)
+        self.to(**init_params)
         for i in range(len(ranks)):
             r = ranks[i]
             dim = components[i]
@@ -433,7 +432,7 @@ class TCA(PartitionTCA):
         """
 
         if not isinstance(ranks, Iterable):
-            rank = (ranks,)
+            ranks = (ranks,)
 
         valence = len(dimensions)
         partitions = [[[j] for j in range(valence)]]

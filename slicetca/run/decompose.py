@@ -55,12 +55,9 @@ def decompose(data: Union[torch.Tensor, np.array],
     if seed is not None:
         seed_everything(seed, workers=True)
 
-    if isinstance(data, np.ndarray): data = torch.tensor(
-        data, device='cuda' if torch.cuda.is_available() else 'cpu')
+    if isinstance(data, np.ndarray): data = torch.tensor(data)
     elif not isinstance(data, torch.Tensor):
         raise ValueError("data must be a torch.Tensor or a numpy.ndarray")
-    else:
-        data = data.to('cuda' if torch.cuda.is_available() else 'cpu', copy=True)
 
     if loss_function is None:
         if data.dtype != torch.long:
@@ -82,7 +79,7 @@ def decompose(data: Union[torch.Tensor, np.array],
         decomposition = TCA
     else:
         decomposition = SliceTCA
-    # if data.device.type == 'cuda': decomposition = decomposition.cuda()
+
     if min_std is not None:
         min_std *= 2
         iter_std //= 2
@@ -133,7 +130,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     val_mask = val_mask & mask
 
     trainer = pl.Trainer(max_epochs=max_iter, min_epochs=10,
-                         accelerator=model.device.type,
+                         accelerator='cuda' if torch.cuda.is_available() else 'cpu',
                          limit_train_batches=batch_num,
                          limit_val_batches=batch_num,
                          enable_progress_bar=progress_bar,
