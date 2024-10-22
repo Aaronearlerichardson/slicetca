@@ -1,12 +1,12 @@
 import torch
-from pytorch_lightning.utilities.types import STEP_OUTPUT
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn, optim
 import numpy as np
 from collections.abc import Iterable
 
 from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 
 def trial_average(X, mask=None, axis=None):
@@ -48,6 +48,17 @@ def error(X, X_hat, mask=None, axis=None):
     diff_masked = diff * mask
     count_non_masked = mask.sum(dim=axis)
     return diff_masked.abs().sum(axis) / count_non_masked
+
+
+def calc_loss(X, X_hat, mask, loss: torch.nn.modules.loss._Loss):
+    if loss.reduction == 'none':
+        return loss(X, X_hat)[mask].mean()
+    elif loss.reduction == 'sum':
+        X_mask = X * mask
+        X_hat_mask = X_hat * mask
+        return loss(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
+    elif loss.reduction == 'mean':
+        return loss(X[mask], X_hat[mask])
 
 
 class PartitionTCA(pl.LightningModule):
@@ -267,27 +278,13 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        X_mask = X * mask
-        # X_avg = trial_average(X, mask, 0)
-        X_hat = self.construct()
-        X_hat_mask = X_hat * mask
-        # X_hat_avg = trial_average(X_hat, mask, 0)
-        mask_id = mask.data_ptr()
-        if mask_id not in self._cache.keys():
-            self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
+        loss = calc_loss(X, self.construct(), mask, self.loss)
         self.losses.append(loss.item())
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        X_mask = X * mask
-        X_hat = self.construct()
-        X_hat_mask = X_hat * mask
-        mask_id = mask.data_ptr()
-        if mask_id not in self._cache.keys():
-            self._cache[mask_id] = mask.sum(dtype=torch.int64)
-        loss = self.loss(X_mask, X_hat_mask) / self._cache[mask_id]
+        loss = calc_loss(X, self.construct(), mask, self.loss)
         to_log = {"val_loss": loss}
         if len(self.losses) > 0:
             to_log["train_loss"] = self.losses[-1]

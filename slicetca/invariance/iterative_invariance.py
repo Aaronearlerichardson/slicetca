@@ -138,5 +138,6 @@ def within_invariance(model: PartitionTCA,
             break
 
     model.set_components(transformation(components))
+    model.requires_grad_(True)
 
     return model

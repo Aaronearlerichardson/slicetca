@@ -1,6 +1,6 @@
 from slicetca.run.decompose import decompose
 
-import multiprocessing as mp
+import torch.multiprocessing as mp
 from functools import partial
 from concurrent.futures import ProcessPoolExecutor as Pool
 from tqdm import tqdm

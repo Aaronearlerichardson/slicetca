@@ -1,15 +1,15 @@
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
 from slicetca.run.utils import block_mask
+from slicetca.invariance import invariance
 
 import torch
 from typing import Union, Sequence
 import numpy as np
 import scipy
 from functools import partial
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping
-from lightning.pytorch import Trainer, seed_everything
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -53,7 +53,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     """
 
     if seed is not None:
-        seed_everything(seed, workers=True)
+        pl.seed_everything(seed, workers=True)
 
     if isinstance(data, np.ndarray): data = torch.tensor(data)
     elif not isinstance(data, torch.Tensor):
@@ -106,11 +106,11 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if min_std is not None:
         early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False)
-        learning_rate_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch', )
+        learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
         cb = [early_stop_callback, learning_rate_monitor]
     else:
         early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
-        learning_rate_monitor = pl.callbacks.LearningRateMonitor(logging_interval='epoch', )
+        learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
         cb = [early_stop_callback, learning_rate_monitor]
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
@@ -129,23 +129,35 @@ def decompose(data: Union[torch.Tensor, np.array],
     train_mask = train_mask & mask
     val_mask = val_mask & mask
 
-    trainer = pl.Trainer(max_epochs=max_iter, min_epochs=10,
-                         accelerator='cuda' if torch.cuda.is_available() else 'cpu',
-                         limit_train_batches=batch_num,
-                         limit_val_batches=batch_num,
-                         enable_progress_bar=progress_bar,
-                         enable_model_summary=detect_anomaly,
-                         enable_checkpointing=False,
-                         callbacks=cb, profiler=profiler,
-                         detect_anomaly=detect_anomaly,
-                         deterministic=True if seed is not None else False)
-    for i in range(batch_prop_decay):
-        trainer.fit(model,
-                    train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** (i + 1)),
-                    val_dataloaders=_feed(data, val_mask, batch_dim, 1.0))
-    # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
+    try:
+        for i in range(batch_prop_decay):
+            trainer = pl.Trainer(max_epochs=max_iter, min_epochs=10,
+                                 accelerator='cuda' if torch.cuda.is_available() else 'cpu',
+                                 # strategy='ddp' if torch.cuda.is_available() else None,
+                                 limit_train_batches=batch_num,
+                                 limit_val_batches=batch_num,
+                                 enable_progress_bar=progress_bar,
+                                 enable_model_summary=detect_anomaly,
+                                 enable_checkpointing=True,
+                                 callbacks=cb, profiler=profiler,
+                                 detect_anomaly=detect_anomaly,
+                                 # precision=64 if data.dtype == torch.float64 else 32,
+                                 deterministic=True if seed is not None else False)
+            trainer.fit(model,
+                        train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** i),
+                        val_dataloaders=_feed(data, val_mask, batch_dim, 1.),
+                        )
+            model.to('cuda')
+            invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
 
-    return model.get_components(numpy=True), model
+        model.to('cpu')
+
+        # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
+
+        return model.get_components(numpy=True), model
+    except Exception as e:
+        yield model.get_components(numpy=True), model
+        raise e
 
 
 def _feed(data, mask, batch_dim=None, batch_prop=1.0):

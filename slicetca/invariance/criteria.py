@@ -20,6 +20,21 @@ def orthogonality_component_type_wise(reconstructed_tensors_of_each_partition: S
     return l + l2(reconstructed_tensors_of_each_partition)
 
 
+def orthogonality_along_dim(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor], dim: int = -1):
+    """
+    Penalizes non-orthogonality between the reconstructed tensors of each partition/slicing.
+
+    :param reconstructed_tensors_of_each_partition: The sum of the terms of a given partition/slicing.
+    :return: Torch float.
+    """
+
+    l = 0
+    for combo in combinations(reconstructed_tensors_of_each_partition, 2):
+        l += torch.nn.CosineSimilarity(dim=dim)(combo[0], combo[1]).mean()
+    return l
+
+
+
 def l2(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor]):
     """
     Classic L_2 regularization, per reconstructed tensors of each partition/slicing.
