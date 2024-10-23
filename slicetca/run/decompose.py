@@ -29,7 +29,8 @@ def decompose(data: Union[torch.Tensor, np.array],
               batch_prop: float = 0.2,
               init_bias: float = 0.,
               loss_function: callable = None,
-              verbose: int = 0) -> (list, Union[SliceTCA, TCA]):
+              verbose: int = 0,
+              compile: bool = False) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -88,7 +89,8 @@ def decompose(data: Union[torch.Tensor, np.array],
                           weight_decay=weight_decay, loss=loss_function,
                           init_bias=init_bias, threshold=min_std,
                           patience=iter_std)
-    # model = torch.compile(model)
+    if compile:
+        model = torch.compile(model)
     if verbose == 0:
         profiler = None
         detect_anomaly = False
@@ -129,35 +131,32 @@ def decompose(data: Union[torch.Tensor, np.array],
     train_mask = train_mask & mask
     val_mask = val_mask & mask
 
-    try:
-        for i in range(batch_prop_decay):
-            trainer = pl.Trainer(max_epochs=max_iter, min_epochs=10,
-                                 accelerator='cuda' if torch.cuda.is_available() else 'cpu',
-                                 # strategy='ddp' if torch.cuda.is_available() else None,
-                                 limit_train_batches=batch_num,
-                                 limit_val_batches=batch_num,
-                                 enable_progress_bar=progress_bar,
-                                 enable_model_summary=detect_anomaly,
-                                 enable_checkpointing=True,
-                                 callbacks=cb, profiler=profiler,
-                                 detect_anomaly=detect_anomaly,
-                                 # precision=64 if data.dtype == torch.float64 else 32,
-                                 deterministic=True if seed is not None else False)
-            trainer.fit(model,
-                        train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** i),
-                        val_dataloaders=_feed(data, val_mask, batch_dim, 1.),
-                        )
-            model.to('cuda')
-            invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
+    for i in range(batch_prop_decay):
+        model.to('cuda')
+        invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
+        trainer = pl.Trainer(max_epochs=max_iter, min_epochs=400,
+                             accelerator='cuda' if torch.cuda.is_available() else 'cpu',
+                             # strategy='ddp' if torch.cuda.is_available() else None,
+                             limit_train_batches=batch_num,
+                             limit_val_batches=batch_num,
+                             enable_progress_bar=progress_bar,
+                             enable_model_summary=detect_anomaly,
+                             enable_checkpointing=True,
+                             callbacks=cb, profiler=profiler,
+                             detect_anomaly=detect_anomaly,
+                             # precision=64 if data.dtype == torch.float64 else 32,
+                             deterministic=True if seed is not None else False)
+        model.to('cuda')
+        trainer.fit(model,
+                    train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** i),
+                    val_dataloaders=_feed(data, val_mask, batch_dim, 1.),
+                    )
 
-        model.to('cpu')
+    model.to('cpu')
 
-        # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
+    # trainer.fit(model, _feed(data, mask, batch_dim, batch_prop))
 
-        return model.get_components(numpy=True), model
-    except Exception as e:
-        yield model.get_components(numpy=True), model
-        raise e
+    return model.get_components(numpy=True), model
 
 
 def _feed(data, mask, batch_dim=None, batch_prop=1.0):
