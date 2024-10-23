@@ -72,18 +72,15 @@ class Data(L.LightningDataModule):
         self.dims = self.data.shape
 
     def train_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.data, self.train_mask, batch_prop=self.prop),
-                          verbose=False)
+        return DataLoader(CustomIterableDataset(self.data, self.train_mask, batch_prop=self.prop))
 
     def val_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.data, self.val_mask, batch_prop=self.prop),
-                          verbose=False)
+        return DataLoader(CustomIterableDataset(self.data, self.val_mask, batch_prop=self.prop))
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
-        return DataLoader(CustomIterableDataset(self.data, self.test_mask, batch_prop=self.prop),
-                          verbose=False)
+        return DataLoader(CustomIterableDataset(self.data, self.test_mask, batch_prop=self.prop))
 
 
 class CustomIterableDataset(IterableDataset):
