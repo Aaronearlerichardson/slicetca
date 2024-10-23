@@ -1,6 +1,6 @@
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
-from slicetca.run.utils import block_mask
+from slicetca.run.data import Data
 from slicetca.invariance import invariance
 
 import torch
@@ -117,19 +117,8 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
 
-    if mask is None:
-        mask = torch.ones_like(data, dtype=torch.bool)
-    data[~mask] = 0
-
-    train_mask, val_mask = block_mask(dimensions=mask.shape,
-                                      train_blocks_dimensions=(1, 1, 10),
-                                      # Note that the blocks will be of size 2*train_blocks_dimensions + 1
-                                      test_blocks_dimensions=(1, 1, 5),
-                                      # Same, 2*test_blocks_dimensions + 1
-                                      fraction_test=0.25,
-                                      device=data.device.type)
-    train_mask = train_mask & mask
-    val_mask = val_mask & mask
+    inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
+    inputs.setup()
 
     for i in range(batch_prop_decay):
         model.to('cuda')
@@ -147,10 +136,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                              # precision=64 if data.dtype == torch.float64 else 32,
                              deterministic=True if seed is not None else False)
         model.to('cuda')
-        trainer.fit(model,
-                    train_dataloaders=_feed(data, train_mask, batch_dim, batch_prop ** i),
-                    val_dataloaders=_feed(data, val_mask, batch_dim, 1.),
-                    )
+        trainer.fit(model, datamodule=inputs)
 
     model.to('cpu')
 
@@ -159,24 +145,4 @@ def decompose(data: Union[torch.Tensor, np.array],
     return model.get_components(numpy=True), model
 
 
-def _feed(data, mask, batch_dim=None, batch_prop=1.0):
-    assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
-    assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
-    dist = torch.empty_like(data)
-    while True:
-        if batch_prop < 1.0:
-            torch.nn.init.uniform_(dist, 0, 1)
-            batch = dist < batch_prop
-            mask_out = mask & batch
-        else:
-            mask_out = mask
 
-        if batch_dim is None:
-            if mask_out.any():
-                yield data, mask_out
-        else:
-            for i in range(data.shape[batch_dim]):
-                idx = [slice(None) if j != batch_dim else i
-                       for j in range(data.ndim)]
-                if mask_out[idx].any():
-                    yield data[idx], mask_out[idx]
