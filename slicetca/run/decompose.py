@@ -19,6 +19,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               learning_rate: float = 5 * 10 ** -3,
               batch_dim: int = None,
               max_iter: int = 10000,
+              min_iter: int = 10,
               min_std: float = None,
               iter_std: int = 100,
               mask: torch.Tensor = None,
@@ -125,7 +126,7 @@ def decompose(data: Union[torch.Tensor, np.array],
     for i in range(batch_prop_decay):
         # model.to('cuda')
         # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
-        trainer = pl.Trainer(max_epochs=max_iter, min_epochs=100,
+        trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
                              accelerator='cuda' if torch.cuda.is_available() else 'cpu',
                              # strategy='ddp' if torch.cuda.is_available() else None,
                              limit_train_batches=batch_num,
