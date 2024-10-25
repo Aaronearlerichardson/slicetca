@@ -116,14 +116,14 @@ def decompose(data: Union[torch.Tensor, np.array],
         cb = [early_stop_callback, learning_rate_monitor]
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-
     inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
     inputs.setup()
 
+
     for i in range(batch_prop_decay):
-        model.to('cuda')
-        invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
-        trainer = pl.Trainer(max_epochs=max_iter, min_epochs=400,
+        # model.to('cuda')
+        # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
+        trainer = pl.Trainer(max_epochs=max_iter, min_epochs=100,
                              accelerator='cuda' if torch.cuda.is_available() else 'cpu',
                              # strategy='ddp' if torch.cuda.is_available() else None,
                              limit_train_batches=batch_num,
@@ -135,7 +135,11 @@ def decompose(data: Union[torch.Tensor, np.array],
                              detect_anomaly=detect_anomaly,
                              # precision=64 if data.dtype == torch.float64 else 32,
                              deterministic=True if seed is not None else False)
+        inputs.prop = batch_prop ** i
         model.to('cuda')
+        # model.training = True
+        # trainer.training = True
+        # trainer.validating = True
         trainer.fit(model, datamodule=inputs)
 
     model.to('cpu')
