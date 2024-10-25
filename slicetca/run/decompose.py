@@ -90,7 +90,9 @@ def decompose(data: Union[torch.Tensor, np.array],
                           init_bias=init_bias, threshold=min_std,
                           patience=iter_std)
     if compile:
-        model = torch.compile(model)
+        if torch.cuda.is_available():
+            model.to('cuda')
+        model.compile(mode='reduce-overhead', fullgraph=True)
     if verbose == 0:
         profiler = None
         detect_anomaly = False
