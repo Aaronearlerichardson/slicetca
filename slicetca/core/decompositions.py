@@ -188,6 +188,36 @@ class PartitionTCA(pl.LightningModule):
                     lhs += ','
             self.einsums.append(lhs + '->' + rhs)
 
+    def set_loss(self, mask):
+        if self.loss.reduction == 'none':
+            if not mask.all():
+                def loss(X, X_hat, mask):
+                    return self.loss(X, X_hat)[mask].mean()
+            else:
+                def loss(X, X_hat, mask):
+                    return self.loss(X, X_hat).mean()
+        elif self.loss.reduction == 'sum':
+            if not mask.all():
+                def loss(X, X_hat, mask):
+                    X_mask = X * mask
+                    X_hat_mask = X_hat * mask
+                    return self.loss(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
+            else:
+                self.loss.reduction = 'mean'
+                def loss(X, X_hat, mask):
+                    return self.loss(X, X_hat)
+        elif self.loss.reduction == 'mean':
+            if not mask.all():
+                def loss(X, X_hat, mask):
+                    return self.loss(X[mask], X_hat[mask])
+            else:
+                def loss(X, X_hat, mask):
+                    return self.loss(X, X_hat)
+        else:
+            raise ValueError('Invalid reduction method for loss function.')
+
+        self._loss_calc = loss
+
     def construct_single_component(self, partition: int, k: int):
         """
         Constructs the kth term of the given partition.
@@ -278,18 +308,19 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        loss = calc_loss(X, self.construct(), mask, self.loss)
+        loss = self._loss_calc(X, self.construct(), mask)
         self.losses.append(loss.item())
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        loss = calc_loss(X, self.construct(), mask, self.loss)
+        loss = self._loss_calc(X, self.construct(), mask)
         to_log = {"val_loss": loss}
         if len(self.losses) > 0:
             to_log["train_loss"] = self.losses[-1]
             self.losses[-1] = loss.item()
-        self.log_dict(to_log, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict(to_log, on_epoch=True, prog_bar=True, logger=True,
+                      add_dataloader_idx=False)
         return loss
 
     def configure_optimizers(self):

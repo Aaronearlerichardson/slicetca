@@ -1,7 +1,12 @@
+import sys
+
+from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
+
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
 from slicetca.run.data import Data
 from slicetca.invariance import invariance
+from typing import Any
 
 import torch
 from typing import Union, Sequence
@@ -9,7 +14,7 @@ import numpy as np
 import scipy
 from functools import partial
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, TQDMProgressBar
 
 
 def decompose(data: Union[torch.Tensor, np.array],
@@ -27,7 +32,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               seed: int = 7,
               weight_decay: float = None,
               batch_prop_decay: int = 1,
-              batch_prop: float = 0.2,
+              batch_prop: float = 1.,
               init_bias: float = 0.,
               loss_function: callable = None,
               verbose: int = 0,
@@ -90,6 +95,8 @@ def decompose(data: Union[torch.Tensor, np.array],
                           weight_decay=weight_decay, loss=loss_function,
                           init_bias=init_bias, threshold=min_std,
                           patience=iter_std)
+    model.set_loss(mask)
+
     if compile:
         if torch.cuda.is_available():
             model.to('cuda')
@@ -115,8 +122,10 @@ def decompose(data: Union[torch.Tensor, np.array],
         cb = [early_stop_callback, learning_rate_monitor]
     else:
         early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
-        learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
-        cb = [early_stop_callback, learning_rate_monitor]
+        cb = [early_stop_callback]
+
+    if progress_bar:
+        cb.append(LitProgressBar(leave=True))
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
@@ -131,14 +140,14 @@ def decompose(data: Union[torch.Tensor, np.array],
                              # strategy='ddp' if torch.cuda.is_available() else None,
                              limit_train_batches=batch_num,
                              limit_val_batches=batch_num,
-                             enable_progress_bar=progress_bar,
+                             # enable_progress_bar=True,
                              enable_model_summary=detect_anomaly,
                              enable_checkpointing=False,
                              callbacks=cb, profiler=profiler,
                              detect_anomaly=detect_anomaly,
                              # precision=64 if data.dtype == torch.float64 else 32,
                              deterministic=True if seed is not None else False)
-        inputs.prop = batch_prop ** i
+        inputs.prop = batch_prop ** (i + 1)
         model.to('cuda')
         # model.training = True
         # trainer.training = True
@@ -152,4 +161,54 @@ def decompose(data: Union[torch.Tensor, np.array],
     return model.get_components(numpy=True), model
 
 
+class LitProgressBar(TQDMProgressBar):
 
+    def __init__(self, *args, **kwargs):
+        super(LitProgressBar, self).__init__(*args, **kwargs)
+        self.val_progress_bar = self.init_validation_tqdm()
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        n = trainer.global_step
+        if self._should_update(n, self.val_progress_bar.total):
+            _update_n(self.val_progress_bar, n)
+        metrics = self.get_metrics(trainer, pl_module)
+        self.val_progress_bar.set_postfix(metrics)
+
+    def init_validation_tqdm(self) -> Tqdm:
+        return Tqdm(disable=False, leave=True)
+
+    def init_train_tqdm(self) -> Tqdm:
+        return Tqdm(disable=True)
+
+    def init_predict_tqdm(self) -> Tqdm:
+        return Tqdm(disable=True)
+
+    def init_test_tqdm(self) -> Tqdm:
+        return Tqdm(disable=True)
+
+    def on_validation_batch_start(
+            self,
+            trainer: "pl.Trainer",
+            pl_module: "pl.LightningModule",
+            batch: Any,
+            batch_idx: int,
+            dataloader_idx: int = 0,
+    ) -> None:
+        pass
+
+    def on_validation_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        pass
+
+    def on_validation_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        pass
+
+    def on_sanity_check_start(self, *_: Any) -> None:
+        pass
+
+    def on_sanity_check_end(self, *_: Any) -> None:
+        pass
+
+def _update_n(bar, value: int) -> None:
+    if not bar.disable:
+        bar.n = value
+        bar.refresh()
