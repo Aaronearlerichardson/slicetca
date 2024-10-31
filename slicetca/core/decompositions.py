@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
 import lightning.pytorch as pl
+import functools
 
 
 def trial_average(X, mask=None, axis=None):
@@ -50,15 +51,41 @@ def error(X, X_hat, mask=None, axis=None):
     return diff_masked.abs().sum(axis) / count_non_masked
 
 
-def calc_loss(X, X_hat, mask, loss: torch.nn.modules.loss._Loss):
-    if loss.reduction == 'none':
-        return loss(X, X_hat)[mask].mean()
-    elif loss.reduction == 'sum':
-        X_mask = X * mask
-        X_hat_mask = X_hat * mask
-        return loss(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
-    elif loss.reduction == 'mean':
-        return loss(X[mask], X_hat[mask])
+def set_loss(loss_fn, has_mask):
+    if loss_fn.reduction == 'none':
+        if has_mask:
+            loss_calc = functools.partial(loss_fn_with_mask, loss_fn=loss_fn)
+        else:
+            loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
+    elif loss_fn.reduction == 'sum':
+        if has_mask:
+            loss_calc = functools.partial(loss_fn_sum_with_mask, loss_fn=loss_fn)
+        else:
+            loss_fn.reduction = 'mean'
+            loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
+    elif loss_fn.reduction == 'mean':
+        if has_mask:
+            loss_calc = functools.partial(loss_fn_mean_with_mask, loss_fn=loss_fn)
+        else:
+            loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
+    else:
+        raise ValueError('Invalid reduction method for loss function.')
+
+    return loss_calc
+
+def loss_fn_with_mask(X, X_hat, mask, loss_fn):
+    return loss_fn(X, X_hat)[mask].mean()
+
+def loss_fn_no_mask(X, X_hat, loss_fn):
+    return loss_fn(X, X_hat).mean()
+
+def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
+    X_mask = X * mask
+    X_hat_mask = X_hat * mask
+    return loss_fn(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
+
+def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
+    return loss_fn(X[mask], X_hat[mask])
 
 
 class PartitionTCA(pl.LightningModule):
@@ -189,34 +216,7 @@ class PartitionTCA(pl.LightningModule):
             self.einsums.append(lhs + '->' + rhs)
 
     def set_loss(self, mask):
-        if self.loss.reduction == 'none':
-            if not mask.all():
-                def loss(X, X_hat, mask):
-                    return self.loss(X, X_hat)[mask].mean()
-            else:
-                def loss(X, X_hat, mask):
-                    return self.loss(X, X_hat).mean()
-        elif self.loss.reduction == 'sum':
-            if not mask.all():
-                def loss(X, X_hat, mask):
-                    X_mask = X * mask
-                    X_hat_mask = X_hat * mask
-                    return self.loss(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
-            else:
-                self.loss.reduction = 'mean'
-                def loss(X, X_hat, mask):
-                    return self.loss(X, X_hat)
-        elif self.loss.reduction == 'mean':
-            if not mask.all():
-                def loss(X, X_hat, mask):
-                    return self.loss(X[mask], X_hat[mask])
-            else:
-                def loss(X, X_hat, mask):
-                    return self.loss(X, X_hat)
-        else:
-            raise ValueError('Invalid reduction method for loss function.')
-
-        self._loss_calc = loss
+        self._loss_calc = set_loss(self.loss, mask is not None)
 
     def construct_single_component(self, partition: int, k: int):
         """
