@@ -320,7 +320,7 @@ class PartitionTCA(pl.LightningModule):
             to_log["train_loss"] = self.losses[-1]
             self.losses[-1] = loss.item()
         self.log_dict(to_log, on_epoch=True, prog_bar=True, logger=True,
-                      add_dataloader_idx=False)
+                      add_dataloader_idx=False, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
