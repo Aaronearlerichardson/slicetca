@@ -116,23 +116,23 @@ def decompose(data: Union[torch.Tensor, np.array],
     else:
         raise ValueError("verbose must be 0, 1, 2, or 3")
 
-    if min_std is not None:
-        early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False)
-        learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
-        cb = [early_stop_callback, learning_rate_monitor]
-    else:
-        early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
-        cb = [early_stop_callback]
-
-    if progress_bar:
-        cb.append(LitProgressBar(leave=True))
-
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
     inputs.setup()
 
+    for i in range(1, batch_prop_decay + 1):
 
-    for i in range(batch_prop_decay):
+        if min_std is not None:
+            early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False)
+            learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
+            cb = [early_stop_callback, learning_rate_monitor]
+        else:
+            early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
+            cb = [early_stop_callback]
+
+        if progress_bar:
+            cb.append(LitProgressBar(leave=True))
+
         # model.to('cuda')
         # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
@@ -147,9 +147,10 @@ def decompose(data: Union[torch.Tensor, np.array],
                              detect_anomaly=detect_anomaly,
                              # precision=64 if data.dtype == torch.float64 else 32,
                              deterministic=True if seed is not None else False)
-        inputs.prop = batch_prop ** (i + 1)
+        true_prop = 1 - (1 - batch_prop) ** i
+        inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop
         model.to('cuda')
-        # model.training = True
+        model.training = True
         # trainer.training = True
         # trainer.validating = True
         trainer.fit(model, datamodule=inputs)

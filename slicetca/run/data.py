@@ -18,10 +18,14 @@ class Data(L.LightningDataModule):
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def setup(self, stage: str = None):
         self.data = torch.as_tensor(self.data)
         self.mask = torch.as_tensor(self.mask)
+        if self.data.device.type != self.device:
+            self.data.pin_memory(self.device)
+            self.mask.pin_memory(self.device)
         n_folds = self.n_folds
         if self.test:
             train_mask1, test_mask = block_mask(dimensions=self.mask.shape,
@@ -66,6 +70,7 @@ class CustomIterableDataset(IterableDataset):
         self.mask = mask
         self.batch_prop = batch_prop
         self.batch_dim = batch_dim
+        self.gen = torch.Generator(device=self.data.device.type)
 
     def __iter__(self):
         if self.batch_prop < 1.0 and self.batch_dim is None:
@@ -81,7 +86,8 @@ class CustomIterableDataset(IterableDataset):
 
     def __iter1(self):
         """Batch_prop < 1.0, batch_dim is None"""
-        dist = torch.empty_like(self.data, dtype=torch.float16)
+        dist = torch.empty(list(self.data.shape[:-1]) + [1],
+                           dtype=torch.float16, device=self.data.device)
         while True:
             torch.nn.init.uniform_(dist, 0, 1)
             batch = dist < self.batch_prop
@@ -92,7 +98,8 @@ class CustomIterableDataset(IterableDataset):
 
     def __iter2(self):
         """Batch_prop < 1.0, batch_dim is not None"""
-        dist = torch.empty_like(self.data, dtype=torch.float16)
+        dist = torch.empty(list(self.data.shape[:-1]) + [1],
+                           dtype=torch.float16, device=self.data.device)
         while True:
             torch.nn.init.uniform_(dist, 0, 1)
             batch = dist < self.batch_prop
