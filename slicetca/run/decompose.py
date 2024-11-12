@@ -127,7 +127,7 @@ def decompose(data: Union[torch.Tensor, np.array],
             learning_rate_monitor = LearningRateMonitor(logging_interval='epoch', )
             cb = [early_stop_callback, learning_rate_monitor]
         else:
-            early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=iter_std)
+            early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=min_iter)
             cb = [early_stop_callback]
 
         if progress_bar:
@@ -151,6 +151,8 @@ def decompose(data: Union[torch.Tensor, np.array],
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop
         model.to('cuda')
         model.training = True
+        model.trainer = trainer
+        # model = model.to_torchscript()
         # trainer.training = True
         # trainer.validating = True
         trainer.fit(model, datamodule=inputs)

@@ -1,6 +1,6 @@
 import torch
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch import nn, optim
+from torch import nn, optim, jit
 import numpy as np
 from collections.abc import Iterable
 
@@ -87,7 +87,6 @@ def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
 def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X[mask], X_hat[mask])
 
-
 class PartitionTCA(pl.LightningModule):
 
     def __init__(self,
@@ -130,9 +129,10 @@ class PartitionTCA(pl.LightningModule):
             else: raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
         if isinstance(positive, bool):
-            if positive: positive_function = [[torch.abs for j in i] for i in partitions]
-            else: positive_function = [[self.identity for j in i] for i in partitions]
+            if positive: positive_function = torch.abs
+            else: positive_function = self.identity
         elif isinstance(positive, tuple) or isinstance(positive, list): positive_function = positive
+        else: raise Exception('Positive must be a boolean or a list of functions')
 
         vectors = nn.ModuleList([])
         init_params = dict(device=self.device, dtype=dtype)
@@ -143,13 +143,13 @@ class PartitionTCA(pl.LightningModule):
 
             # k-tensors of the outer product
             if initialization == 'normal':
-                v = [nn.Parameter(positive_function[i][j](torch.randn([r]+d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function(torch.randn([r]+d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform':
-                v = [nn.Parameter(positive_function[i][j](2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function(2*(torch.rand([r] + d, **init_params)-0.5)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'uniform-positive':
-                v = [nn.Parameter(positive_function[i][j](torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function(torch.rand([r] + d, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             elif initialization == 'orthogonal':
-                v = [nn.Parameter(positive_function[i][j](generate_orthogonal_tensor(*([r] + d), positive=True, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
+                v = [nn.Parameter(positive_function(generate_orthogonal_tensor(*([r] + d), positive=True, **init_params)*init_weight + init_bias)) for j, d in enumerate(dim)]
             else:
                 raise Exception('Undefined initialization, select one of : normal, uniform, uniform-positive')
 
@@ -159,7 +159,7 @@ class PartitionTCA(pl.LightningModule):
 
         self.dimensions = dimensions
         self.partitions = partitions
-        self.ranks = ranks
+        self.ranks = torch.as_tensor(ranks, device=self.device, dtype=torch.int32)
         self.positive = positive
         self.initialization = initialization
         self.init_weight = init_weight
@@ -170,6 +170,11 @@ class PartitionTCA(pl.LightningModule):
         self.valence = len(dimensions)
 
         self.loss = loss
+        # # check for 'dtype' and 'device' attributes and set them if not present
+        # if not hasattr(self, 'dtype'):
+        #     self.dtype = dtype
+        # if not hasattr(self, 'device'):
+        #     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.losses = []
         self._lr = lr
         self._weight_decay = weight_decay
@@ -228,8 +233,7 @@ class PartitionTCA(pl.LightningModule):
         """
         temp = []
         for q in range(len(self.components[partition])):
-            func = self.positive_function[partition][q]
-            temp.append(func(self.vectors[partition][q][k]))
+            temp.append(self.positive_function(self.vectors[partition][q][k]))
         # temp = [self.positive_function[partition][q](self.vectors[partition][q][k]) for q in range(len(self.components[partition]))]
         outer = torch.einsum(self.einsums[partition], temp)
         outer = outer.permute(self.inverse_permutations[partition])
@@ -244,8 +248,8 @@ class PartitionTCA(pl.LightningModule):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions, dtype=self.dtype, device=self.device)
-        for j in range(self.ranks[partition]):
+        temp = torch.zeros(self.dimensions, dtype=self.vectors[0][0].dtype, device=self.vectors[0][0].device)
+        for j in range(self.ranks[partition].item()):
             temp += self.construct_single_component(partition, j)
 
         return temp
@@ -256,7 +260,7 @@ class PartitionTCA(pl.LightningModule):
         :return: Tensor of shape self.dimensions
         """
 
-        temp = torch.zeros(self.dimensions, dtype=self.dtype, device=self.device)
+        temp = torch.zeros(self.dimensions, dtype=self.vectors[0][0].dtype, device=self.vectors[0][0].device)
 
         for i in range(len(self.partitions)):
             for j in range(self.ranks[i]):
@@ -281,10 +285,10 @@ class PartitionTCA(pl.LightningModule):
         for i in range(len(self.vectors)):
             for j in range(len(self.vectors[i])):
                 if numpy:
-                    temp[i].append( self.positive_function[i][j](self.vectors[i][j]).data.detach().cpu().numpy())
+                    temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
                 else:
-                    if not detach: temp[i].append(self.positive_function[i][j](self.vectors[i][j]).data.detach())
-                    else: temp[i].append(self.positive_function[i][j](self.vectors[i][j]).data)
+                    if not detach: temp[i].append(self.positive_function(self.vectors[i][j]).data.detach())
+                    else: temp[i].append(self.positive_function(self.vectors[i][j]).data)
 
         return temp
 
