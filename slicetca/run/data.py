@@ -19,8 +19,13 @@ class Data(L.LightningDataModule):
         self.prop = prop
         self.test = test
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.val_mask = torch.empty_like(self.mask, dtype=torch.bool)
+        self.train_mask = torch.empty_like(self.mask, dtype=torch.bool)
+        self.test_mask = torch.empty_like(self.mask, dtype=torch.bool)
+        self.dims = self.data.shape
+        self._setup()
 
-    def setup(self, stage: str = None):
+    def _setup(self):
         self.data = torch.as_tensor(self.data)
         self.mask = torch.as_tensor(self.mask)
         if self.data.device.type != self.device:
@@ -46,7 +51,6 @@ class Data(L.LightningDataModule):
                                            device=self.data.device.type)
         self.train_mask = (train_mask1 & train_mask2) & self.mask
         self.val_mask = (val_mask & ~test_mask) & self.mask
-        self.dims = self.data.shape
 
     def train_dataloader(self):
         return DataLoader(CustomIterableDataset(self.data, self.train_mask, batch_prop=self.prop),

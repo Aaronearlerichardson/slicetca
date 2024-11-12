@@ -118,7 +118,6 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
     inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
-    inputs.setup()
 
     for i in range(1, batch_prop_decay + 1):
 
