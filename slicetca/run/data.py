@@ -53,13 +53,13 @@ class Data(L.LightningDataModule):
                           batch_size=None, num_workers=0, pin_memory=True)
 
     def val_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.data, self.val_mask, batch_prop=self.prop),
+        return DataLoader(CustomIterableDataset(self.data, self.val_mask, batch_prop=1.),
                           batch_size=None, num_workers=0, pin_memory=True)
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
-        return DataLoader(CustomIterableDataset(self.data, self.test_mask, batch_prop=self.prop),
+        return DataLoader(CustomIterableDataset(self.data, self.test_mask, batch_prop=1.),
                           batch_size=None, num_workers=0, pin_memory=True)
 
 class CustomIterableDataset(IterableDataset):
