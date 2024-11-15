@@ -132,7 +132,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
 
     if mask_test is not None and data.is_sparse:
         data = data.to_dense()[mask_test]
-        loss = model._loss_calc(data, data_hat)
+        loss = model._loss_calc(data, data_hat, torch.ones_like(data))
     elif mask_test is not None:
         data_mask = data[mask_test]
         if isinstance(data_hat, int):
@@ -141,7 +141,7 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
             data_hat = data_hat[mask_test]
         else:
             raise ValueError('Mask test shape does not match data shape.')
-        loss = model._loss_calc(data_mask, data_hat)
+        loss = model._loss_calc(data_mask, data_hat, torch.ones_like(data_mask))
     else:
         loss = model.losses[-1]
 
