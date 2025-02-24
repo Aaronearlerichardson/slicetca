@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, IterableDataset
 
 class Data(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, mask: torch.Tensor = None,
-                 n_folds: int = 5, prop: float = 1.0, test: bool = False):
+                 n_folds: int = 5, prop: float = 1.0, device: str = None, test: bool = False):
         super().__init__()
         if mask is None:
             self.mask = torch.ones_like(data, dtype=torch.bool)
@@ -18,12 +18,22 @@ class Data(L.LightningDataModule):
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = self.set_device(device)
         self.val_mask = torch.empty_like(self.mask, dtype=torch.bool)
         self.train_mask = torch.empty_like(self.mask, dtype=torch.bool)
         self.test_mask = torch.empty_like(self.mask, dtype=torch.bool)
         self.dims = self.data.shape
         self._setup()
+
+    def set_device(self, device):
+        if device is not None:
+            return device
+        elif torch.cuda.is_available():
+            return 'cuda'
+        elif torch.xpu.is_available():
+            return 'xpu'
+        else:
+            return 'cpu'
 
     def _setup(self):
         self.data = torch.as_tensor(self.data)
@@ -32,10 +42,12 @@ class Data(L.LightningDataModule):
             self.data.pin_memory(self.device)
             self.mask.pin_memory(self.device)
         n_folds = self.n_folds
+        train_dim = tuple(1 for _ in range(self.data.ndim - 1)) + (10,)
+        test_dim = tuple(1 for _ in range(self.data.ndim - 1)) + (5,)
         if self.test:
             train_mask1, test_mask = block_mask(dimensions=self.mask.shape,
-                                                train_blocks_dimensions=(1, 1, 10),
-                                                test_blocks_dimensions=(1, 1, 5),
+                                                train_blocks_dimensions=train_dim,
+                                                test_blocks_dimensions=test_dim,
                                                 fraction_test=1/n_folds,
                                                 device=self.data.device.type)
             self.test_mask = test_mask & self.mask
@@ -45,12 +57,15 @@ class Data(L.LightningDataModule):
             test_mask = torch.zeros_like(self.mask, dtype=torch.bool)
 
         train_mask2, val_mask = block_mask(dimensions=self.mask.shape,
-                                           train_blocks_dimensions=(1, 1, 10),
-                                           test_blocks_dimensions=(1, 1, 5),
+                                           train_blocks_dimensions=train_dim,
+                                           test_blocks_dimensions=test_dim,
                                            fraction_test=1/n_folds,
                                            device=self.data.device.type)
         self.train_mask = (train_mask1 & train_mask2) & self.mask
         self.val_mask = (val_mask & ~test_mask) & self.mask
+
+    def setup(self, stage: str) -> None:
+        pass
 
     def train_dataloader(self):
         return DataLoader(CustomIterableDataset(self.data, self.train_mask, batch_prop=self.prop),

@@ -1,5 +1,3 @@
-import sys
-
 from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
 
 from slicetca.core import SliceTCA, TCA
@@ -11,6 +9,7 @@ from typing import Any
 import torch
 from typing import Union, Sequence
 import numpy as np
+import os
 import scipy
 from functools import partial
 import lightning.pytorch as pl
@@ -35,6 +34,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               batch_prop: float = 1.,
               init_bias: float = 0.,
               loss_function: callable = None,
+              device: str = None,
               verbose: int = 0,
               compile: bool = False) -> (list, Union[SliceTCA, TCA]):
     """
@@ -62,16 +62,29 @@ def decompose(data: Union[torch.Tensor, np.array],
     if seed is not None:
         pl.seed_everything(seed, workers=True)
 
+    if device is not None:
+        pass
+    elif torch.cuda.is_available():
+        device = 'cuda'
+    elif torch.xpu.is_available():
+        device = 'xpu'
+    else:
+        device = 'cpu'
+
     if isinstance(data, np.ndarray): data = torch.tensor(data)
     elif not isinstance(data, torch.Tensor):
         raise ValueError("data must be a torch.Tensor or a numpy.ndarray")
+
+    data.to(device)
+    if mask is not None:
+        mask.to(device)
 
     if loss_function is None:
         if data.dtype != torch.long:
             loss_function = torch.nn.MSELoss(reduction='sum')
         else:
             spikes_factorial = torch.tensor(scipy.special.factorial(
-                data.numpy(force=True)), device=data.device)
+                data.numpy(force=True)), device=device)
             loss_function = partial(poisson_log_likelihood,
                                     spikes_factorial=spikes_factorial)
 
@@ -117,7 +130,7 @@ def decompose(data: Union[torch.Tensor, np.array],
         raise ValueError("verbose must be 0, 1, 2, or 3")
 
     batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-    inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False)
+    inputs = Data(data, mask, n_folds=5, prop=batch_prop, test=False, device=device)
 
     for i in range(1, batch_prop_decay + 1):
 
@@ -132,20 +145,31 @@ def decompose(data: Union[torch.Tensor, np.array],
         if progress_bar:
             cb.append(LitProgressBar(leave=True))
 
+        match data.dtype:
+            case torch.float64:
+                precision = "64-true"
+            case torch.float32:
+                precision = "32-true"
+            case torch.float16 | torch.bfloat16:
+                precision = "16-true"
+            case _:
+                precision = "32-true"
+
         # model.to('cuda')
         # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
-                             accelerator='cuda' if torch.cuda.is_available() else 'cpu',
+                             accelerator=device,
                              # strategy='ddp' if torch.cuda.is_available() else None,
                              limit_train_batches=batch_num,
                              limit_val_batches=batch_num,
-                             # enable_progress_bar=True,
+                             enable_progress_bar=progress_bar,
                              enable_model_summary=detect_anomaly,
                              enable_checkpointing=False,
                              callbacks=cb, profiler=profiler,
                              detect_anomaly=detect_anomaly,
-                             # precision=64 if data.dtype == torch.float64 else 32,
-                             deterministic=True if seed is not None else False)
+                             precision=precision,
+                             deterministic=True if seed is not None else False,
+                             reload_dataloaders_every_n_epochs=max_iter)
         true_prop = 1 - (1 - batch_prop) ** i
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop
         model.to('cuda')
