@@ -6,7 +6,8 @@ from torch.utils.data import DataLoader, IterableDataset
 
 class Data(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, mask: torch.Tensor = None,
-                 n_folds: int = 5, prop: float = 1.0, device: str = None, test: bool = False):
+                 n_folds: int = 5, prop: float = 1.0, dim: int = None,
+                 device: str = None, test: bool = False):
         super().__init__()
         if mask is None:
             self.mask = torch.ones_like(data, dtype=torch.bool)
@@ -14,7 +15,8 @@ class Data(L.LightningDataModule):
             self.mask = mask
 
         self.data = data
-        self.batch_size = 1
+        self.batch_dim = dim
+        self.batch_size = 1 if dim is None else data.shape[dim]
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
@@ -68,17 +70,17 @@ class Data(L.LightningDataModule):
         pass
 
     def train_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.data, self.train_mask, batch_prop=self.prop),
+        return DataLoader(CustomIterableDataset(self.data, self.train_mask, self.prop, self.batch_dim),
                           batch_size=None, num_workers=0, pin_memory=True)
 
     def val_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.data, self.val_mask, batch_prop=1.),
+        return DataLoader(CustomIterableDataset(self.data, self.val_mask, 1., self.batch_dim),
                           batch_size=None, num_workers=0, pin_memory=True)
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
-        return DataLoader(CustomIterableDataset(self.data, self.test_mask, batch_prop=1.),
+        return DataLoader(CustomIterableDataset(self.data, self.test_mask, 1., self.batch_dim),
                           batch_size=None, num_workers=0, pin_memory=True)
 
 class CustomIterableDataset(IterableDataset):

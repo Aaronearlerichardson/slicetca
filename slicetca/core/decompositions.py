@@ -76,13 +76,13 @@ def set_loss(loss_fn, has_mask):
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X, X_hat)[mask].mean()
 
-def loss_fn_no_mask(X, X_hat, mask,loss_fn):
+def loss_fn_no_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X, X_hat).mean()
 
 def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
     X_mask = X * mask
     X_hat_mask = X_hat * mask
-    return loss_fn(X_mask, X_hat_mask) / mask.sum(dtype=torch.int64)
+    return loss_fn(X_mask, X_hat_mask)
 
 def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X[mask], X_hat[mask])
