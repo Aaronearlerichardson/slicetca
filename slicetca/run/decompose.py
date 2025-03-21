@@ -105,20 +105,11 @@ def decompose(data: Union[torch.Tensor, np.array],
         if progress_bar:
             cb.append(LitProgressBar(leave=True))
 
-        # match data.dtype:
-        #     case torch.float64:
-        #         precision = "64-true"
-        #     case torch.float32:
-        #         precision = "32-true"
-        #     case torch.float16 | torch.bfloat16:
-        #         precision = "16-true"
-        #     case _:
-        #         precision = "32-true"
-
         # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
-                             accelerator=slicetca.run.utils.XPUAccelerator() if device == 'xpu' else device,
+                             accelerator='auto' if device == 'xpu' else device,
                              # strategy='ddp' if torch.cuda.is_available() else None,
+                             strategy=slicetca.run.utils.SingleXPUStrategy() if device == 'xpu' else 'auto',
                              limit_train_batches=batch_num,
                              limit_val_batches=batch_num,
                              enable_progress_bar=progress_bar,
