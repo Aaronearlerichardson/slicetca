@@ -119,7 +119,8 @@ def plot(model,
                     # =========== Axes labels ===========
                     variable_x = variables[partitions[i][k][1]]
                     variable_y = variables[partitions[i][k][0]]
-                    ax.set_xlabel(variable_x)
+                    if j == ranks[i] - 1:  # Only label the last rank to avoid overlap
+                        ax.set_xlabel(variable_x)
                     ax.set_ylabel(variable_y)
 
                     if ticks[partitions[i][k][0]] is not None:
