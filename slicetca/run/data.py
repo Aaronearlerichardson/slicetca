@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, IterableDataset
 class BatchedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, dim: int,
                  shuffle_dim = (0,), mask: torch.Tensor = None,
-                 n_folds: int = 5, prop: float = 1.0,  device: str = None, test: bool = False):
+                 n_folds: int = 5, prop: float = 1.0, test: bool = False):
         super().__init__()
 
         self.batch_dim = dim
@@ -16,166 +16,128 @@ class BatchedData(L.LightningDataModule):
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
-        self.device = self.set_device(device)
-        data, mask = handle_data(data, mask, device)
+        data, mask = handle_data(data, mask)
         self.dims = data.shape
-        # self._setup(data, mask, n_folds, dim)
-        perm = torch.randperm(data.shape[dim], device=self.device)
-        idx = tuple(slice(None) if i != dim else perm for i in range(data.ndim))
-        self.data = data[idx]
-        self.mask = mask[idx]
-        fold_size = self.data.shape[dim] // n_folds
-        data_slice = [slice(None)] * self.data.ndim
-        data_slice[dim] = slice(0, fold_size)
-        self.val_data = self.data[tuple(data_slice)]
-        self.val_mask = self.mask[tuple(data_slice)]
-        if self.test:
-            data_slice[dim] = slice(fold_size, 2 * fold_size)
-            self.test_data = self.data[tuple(data_slice)]
-            self.test_mask = self.mask[tuple(data_slice)]
-            data_slice[dim] = slice(2 * fold_size, None)
-            self.train_data = self.data[tuple(data_slice)]
-            self.train_mask = self.mask[tuple(data_slice)]
-        else:
-            self.test_data = None
-            self.test_mask = None
-            data_slice[dim] = slice(fold_size, None)
-            self.train_data = self.data[tuple(data_slice)]
-            self.train_mask = self.mask[tuple(data_slice)]
+        self.data = data
+        if mask is None:
+            mask = torch.ones_like(data, dtype=torch.bool)
+        self.mask = mask
 
-    def set_device(self, device):
-        if device is not None:
-            return device
-        elif torch.cuda.is_available():
-            return 'cuda'
-        elif torch.xpu.is_available():
-            return 'xpu'
-        else:
-            return 'cpu'
-
-    def _setup(self, data, mask, n_folds, dim):
-        data = torch.as_tensor(data)
-        mask = torch.as_tensor(mask)
-        perm = torch.randperm(data.shape[dim], device=self.device)
-        self.data = torch.take_along_dim(data, perm, dim)
-        self.mask = torch.take_along_dim(mask, perm, dim)
-        if self.data.device.type != self.device:
-            self.data.pin_memory(self.device)
-            self.mask.pin_memory(self.device)
-        fold_size = self.data.shape[dim] // n_folds
-        data_slice = [slice(None)] * self.data.ndim
-        data_slice[dim] = slice(0, fold_size)
-        self.val_data = self.data[tuple(data_slice)]
-        self.val_mask = self.mask[tuple(data_slice)]
-        if self.test:
-            data_slice[dim] = slice(fold_size, 2 * fold_size)
-            self.test_data = self.data[tuple(data_slice)]
-            self.test_mask = self.mask[tuple(data_slice)]
-            data_slice[dim] = slice(2 * fold_size, None)
-            self.train_data = self.data[tuple(data_slice)]
-            self.train_mask = self.mask[tuple(data_slice)]
-        else:
-            self.test_data = None
-            self.test_mask = None
-            data_slice[dim] = slice(fold_size, None)
-            self.train_data = self.data[tuple(data_slice)]
-            self.train_mask = self.mask[tuple(data_slice)]
-
+    def prepare_data(self) -> None:
+        perm = torch.randperm(self.data.shape[self.batch_dim])
+        idx = tuple(slice(None) if i != self.batch_dim else perm for i in range(self.data.ndim))
+        self.data = self.data[idx]
+        self.mask = self.mask[idx]
 
     def setup(self, stage: str) -> None:
-        pass
+        if stage == "fit":
+            fold_size = self.data.shape[self.batch_dim] // self.n_folds
+            data_slice = [slice(None)] * self.data.ndim
+            data_slice[self.batch_dim] = slice(0, fold_size)
+            self.val_data = self.data[tuple(data_slice)]
+            self.val_mask = self.mask[tuple(data_slice)]
+            if self.test:
+                data_slice[self.batch_dim] = slice(fold_size, 2 * fold_size)
+                self.test_data = self.data[tuple(data_slice)]
+                self.test_mask = self.mask[tuple(data_slice)]
+                data_slice[self.batch_dim] = slice(2 * fold_size, None)
+                self.train_data = self.data[tuple(data_slice)]
+                self.train_mask = self.mask[tuple(data_slice)]
+            else:
+                self.test_data = None
+                self.test_mask = None
+                data_slice[self.batch_dim] = slice(fold_size, None)
+                self.train_data = self.data[tuple(data_slice)]
+                self.train_mask = self.mask[tuple(data_slice)]
+
+        if stage == "test":
+            assert getattr(self, "test_data", None) is not None,\
+                "Test data and mask must be set up before testing."
+
+        if stage == "validate":
+            assert hasattr(self, "val_data")
+
+        if stage == "train":
+            assert hasattr(self, "train_data")
 
     def train_dataloader(self):
         return DataLoader(CustomIterableDataset(self.train_data, self.train_mask, self.prop, self.batch_dim, self.shuffle_dims),
-                          batch_size=1, pin_memory=True)
+                          batch_size=1)
 
     def val_dataloader(self):
         return DataLoader(CustomIterableDataset(self.val_data, self.val_mask, 1., self.batch_dim, self.shuffle_dims),
-                          batch_size=1, pin_memory=True)
+                          batch_size=1)
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
         return DataLoader(CustomIterableDataset(self.test_data, self.test_mask, 1., self.batch_dim, self.shuffle_dims),
-                          batch_size=1, pin_memory=True)
+                          batch_size=1)
 
 class MaskedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, mask: torch.Tensor = None,
-                 n_folds: int = 5, prop: float = 1.0, shuffle_dims = (0, 1),
-                 device: str = None, test: bool = False):
+                 n_folds: int = 5, prop: float = 1.0, shuffle_dims = (0,),
+                 test: bool = False):
         super().__init__()
-        if mask is None:
-            self.mask = torch.ones_like(data, dtype=torch.bool)
-        else:
-            self.mask = mask
 
-        self.data = data
+        self.shuffle_dims = shuffle_dims if isinstance(shuffle_dims, tuple) else (shuffle_dims,)
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
-        self.device = self.set_device(device)
+        data, mask = handle_data(data, mask)
+        self.dims = data.shape
+        self.data = data
+        if mask is None:
+            mask = torch.ones_like(data, dtype=torch.bool)
+        self.mask = mask
+
+    def prepare_data(self) -> None:
         self.val_mask = torch.empty_like(self.mask, dtype=torch.bool)
         self.train_mask = torch.empty_like(self.mask, dtype=torch.bool)
         self.test_mask = torch.empty_like(self.mask, dtype=torch.bool)
-        self.dims = self.data.shape
-        self.shuffle_dims = shuffle_dims if isinstance(shuffle_dims, tuple) else (shuffle_dims,)
-        self._setup()
-
-    def set_device(self, device):
-        if device is not None:
-            return device
-        elif torch.cuda.is_available():
-            return 'cuda'
-        elif torch.xpu.is_available():
-            return 'xpu'
-        else:
-            return 'cpu'
-
-    def _setup(self):
-        self.data = torch.as_tensor(self.data)
-        self.mask = torch.as_tensor(self.mask)
-        if self.data.device.type != self.device:
-            self.data.pin_memory(self.device)
-            self.mask.pin_memory(self.device)
-        n_folds = self.n_folds
-        train_dim = tuple(1 if i in self.shuffle_dims else 10 for i in range(self.data.ndim))
-        test_dim = tuple(1 if i in self.shuffle_dims else 5 for i in range(self.data.ndim))
-        if self.test:
-            train_mask1, test_mask = block_mask(dimensions=self.mask.shape,
-                                                train_blocks_dimensions=train_dim,
-                                                test_blocks_dimensions=test_dim,
-                                                fraction_test=1/n_folds,
-                                                device=self.data.device.type)
-            self.test_mask = test_mask & self.mask
-            n_folds -= 1
-        else:
-            train_mask1 = torch.ones_like(self.mask, dtype=torch.bool)
-            test_mask = torch.zeros_like(self.mask, dtype=torch.bool)
-
-        train_mask2, val_mask = block_mask(dimensions=self.mask.shape,
-                                           train_blocks_dimensions=train_dim,
-                                           test_blocks_dimensions=test_dim,
-                                           fraction_test=1/n_folds,
-                                           device=self.data.device.type)
-        self.train_mask = (train_mask1 & train_mask2) & self.mask
-        self.val_mask = (val_mask & ~test_mask) & self.mask
 
     def setup(self, stage: str) -> None:
-        pass
+        if stage == "fit":
+            n_folds = self.n_folds
+            train_dim = tuple(1 if i in self.shuffle_dims else 10 for i in range(self.data.ndim))
+            test_dim = tuple(1 if i in self.shuffle_dims else 5 for i in range(self.data.ndim))
+            if self.test:
+                train_mask1, test_mask = block_mask(dimensions=self.mask.shape,
+                                                    train_blocks_dimensions=train_dim,
+                                                    test_blocks_dimensions=test_dim,
+                                                    fraction_test=1/n_folds,
+                                                    device=self.data.device.type)
+                self.test_mask = test_mask & self.mask
+                n_folds -= 1
+            else:
+                train_mask1 = torch.ones_like(self.mask, dtype=torch.bool)
+                test_mask = torch.zeros_like(self.mask, dtype=torch.bool)
+
+            train_mask2, val_mask = block_mask(dimensions=self.mask.shape,
+                                               train_blocks_dimensions=train_dim,
+                                               test_blocks_dimensions=test_dim,
+                                               fraction_test=1/n_folds,
+                                               device=self.data.device.type)
+            self.train_mask = (train_mask1 & train_mask2) & self.mask
+            self.val_mask = (val_mask & ~test_mask) & self.mask
+
+        if stage == "test":
+            assert getattr(self, "test_mask", None) is not None,\
+                "Test mask must be set up before testing."
 
     def train_dataloader(self):
         return DataLoader(CustomIterableDataset(self.data, self.train_mask, self.prop, None, self.shuffle_dims),
-                          batch_size=None, num_workers=0, pin_memory=True)
+                          batch_size=None)
 
     def val_dataloader(self):
         return DataLoader(CustomIterableDataset(self.data, self.val_mask, 1., None, self.shuffle_dims),
-                          batch_size=None, num_workers=0, pin_memory=True)
+                          batch_size=None)
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
         return DataLoader(CustomIterableDataset(self.data, self.test_mask, 1., None, self.shuffle_dims),
-                          batch_size=None, num_workers=0, pin_memory=True)
+                          batch_size=None)
 
 class CustomIterableDataset(IterableDataset):
     def __init__(self, data, mask, batch_prop=1.0, batch_dim=None, shuffle_dims=(0,)):
@@ -250,18 +212,6 @@ class CustomIterableDataset(IterableDataset):
                 if mask_out.any():
                     yield self.data[idx], mask_out
 
-    # def shuffle(self, dim: int):
-    #     """Shuffle the data and mask along the specified dimensions."""
-    #     perms = mult(self.data.shape[self.batch_dim],
-    #                  (self.data.shape[dim], self.data.shape[self.batch_dim]), self.gen)
-    #
-    #     # Create an index tensor for advanced indexing
-    #     idx = torch.arange(self.data.shape[dim], device=self.data.device).unsqueeze(-1).expand(-1, self.data.shape[
-    #         self.batch_dim])
-    #
-    #     # Use advanced indexing to shuffle the data and mask
-    #     self.data = self.data.index_select(dim, idx).gather(self.batch_dim, perms)
-    #     self.mask = self.mask.index_select(dim, idx).gather(self.batch_dim, perms)
     def shuffle(self, dim: int):
         """Shuffle the data and mask along the specified dimensions."""
         shuffle_slice = [slice(None)] * self.data.ndim
@@ -274,15 +224,12 @@ class CustomIterableDataset(IterableDataset):
             self.data[tuple(shuffle_slice)] = self.data[tuple(perm_slice)]
             self.mask[tuple(shuffle_slice)] = self.mask[tuple(perm_slice)]
 
-def handle_data(data, mask=None, device=None):
+def handle_data(data, mask=None):
     if mask is None:
         mask = torch.ones_like(data, dtype=torch.bool)
     if not torch.is_tensor(data):
         data = torch.as_tensor(data)
         mask = torch.as_tensor(mask)
-    if data.device.type != device:
-        data = data.to(device)
-        mask = mask.to(device)
     return data, mask
 
 def mult(pop_size, shape, generator, replacement=True):

@@ -82,7 +82,7 @@ def loss_fn_no_mask(X, X_hat, mask, loss_fn):
 def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
     X_mask = X * mask
     X_hat_mask = X_hat * mask
-    return loss_fn(X_mask, X_hat_mask)
+    return loss_fn(X_mask, X_hat_mask) / mask.sum(dtype=torch.float32)
 
 def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X[mask], X_hat[mask.squeeze()])
@@ -330,9 +330,9 @@ class PartitionTCA(pl.LightningModule):
     def configure_optimizers(self):
         eps = 1e-8 if self.dtype != torch.float16 else 1e-7
         if self._weight_decay is None:
-            optimizer = torch.optim.Adam(self.parameters(), self._lr, eps=eps)
+            optimizer = torch.optim.RMSprop(self.parameters(), self._lr, eps=eps)
         else:
-            optimizer = torch.optim.AdamW(self.parameters(), self._lr, eps=eps,
+            optimizer = torch.optim.RMSprop(self.parameters(), self._lr, eps=eps,
                                           weight_decay=self._weight_decay)
         if self._threshold is None:
             return optimizer

@@ -90,10 +90,10 @@ def decompose(data: Union[torch.Tensor, np.array],
     device = handle_device(device, data, mask, model, compile)
     if batch_dim is None:
         batch_num = 1
-        inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim, device, False)
+        inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim,  False)
     else:
         batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, device, False)
+        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop,  False)
 
     profiler, detect_anomaly = handle_verbosity(verbose)
 
@@ -120,6 +120,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                              enable_progress_bar=progress_bar,
                              enable_model_summary=detect_anomaly,
                              enable_checkpointing=False,
+                             # gradient_clip_val=0.5,
                              callbacks=cb, profiler=profiler,
                              detect_anomaly=detect_anomaly,
                              # accumulate_grad_batches=30,
@@ -129,6 +130,14 @@ def decompose(data: Union[torch.Tensor, np.array],
                              )
         true_prop = 1 - (1 - batch_prop) ** i
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop
+
+        # def hook(grad):
+        #     print(f"Gradient norm: {grad.norm()}\n"
+        #           f"Gradient mean: {grad.mean()}\n"
+        #           f"Gradient max: {grad.max()}\n")
+        #
+        # for param in model.parameters():
+        #     param.register_hook(hook)
         model.to(device)
         model.training = True
         model.trainer = trainer
