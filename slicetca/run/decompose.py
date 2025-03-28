@@ -2,7 +2,7 @@ from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
 
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
-from slicetca.run.data import Data
+from slicetca.run.data import BatchedData, MaskedData
 import slicetca.run.utils
 from typing import Any
 
@@ -21,6 +21,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               initialization: str = 'uniform',
               learning_rate: float = 5 * 10 ** -3,
               batch_dim: int = None,
+              shuffle_dim: int | tuple[int] = 0,
               max_iter: int = 10000,
               min_iter: int = 10,
               min_std: float = None,
@@ -87,8 +88,12 @@ def decompose(data: Union[torch.Tensor, np.array],
                           patience=iter_std)
 
     device = handle_device(device, data, mask, model, compile)
-    batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-    inputs = Data(data, mask, 5, batch_prop, batch_dim, device, False)
+    if batch_dim is None:
+        batch_num = 1
+        inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim, device, False)
+    else:
+        batch_num = data.shape[batch_dim] if batch_dim is not None else 1
+        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, device, False)
 
     profiler, detect_anomaly = handle_verbosity(verbose)
 
@@ -117,9 +122,11 @@ def decompose(data: Union[torch.Tensor, np.array],
                              enable_checkpointing=False,
                              callbacks=cb, profiler=profiler,
                              detect_anomaly=detect_anomaly,
+                             # accumulate_grad_batches=30,
                              # precision='auto',
                              deterministic=True if seed is not None else False,
-                             reload_dataloaders_every_n_epochs=max_iter)
+                             # reload_dataloaders_every_n_epochs=max_iter,
+                             )
         true_prop = 1 - (1 - batch_prop) ** i
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop
         model.to(device)

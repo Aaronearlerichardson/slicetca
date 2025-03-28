@@ -85,7 +85,7 @@ def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X_mask, X_hat_mask)
 
 def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
-    return loss_fn(X[mask], X_hat[mask])
+    return loss_fn(X[mask], X_hat[mask.squeeze()])
 
 class PartitionTCA(pl.LightningModule):
 
