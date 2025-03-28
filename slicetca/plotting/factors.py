@@ -10,6 +10,7 @@ def plot(model,
          sorting_indices: Sequence[np.ndarray] = (None, None, None),
          ticks: Sequence[np.ndarray] = (None, None, None),
          tick_labels: Sequence[np.ndarray] = (None, None, None),
+         ignore_component: tuple = (),
          quantile: float = 0.95,
          factor_height: int = 2,
          aspect: str = 'auto',
@@ -54,7 +55,9 @@ def plot(model,
 
     axes = [[[None for k in j] for j in i] for i in components]
 
-    figure_size = max([sum([j.shape[0]*3 if len(j.shape) == 3 else j.shape[0]*factor_height for j in i]) for i in components])
+    figure_size = max([sum([j.shape[0]*3 if len(j.shape) == 3 else j.shape[0]*factor_height
+                            for ji, j in enumerate(i) if ji not in ignore_component])
+                       for i in components])
 
     fig = plt.figure(figsize=(number_nonzero_components*3, figure_size), dpi=dpi)
     gs = fig.add_gridspec(figure_size, number_nonzero_components)
@@ -65,6 +68,10 @@ def plot(model,
         for j in range(ranks[i]):
             for k in range(len(components[i])):
                 current_component = components[i][k][j]
+
+                if k in ignore_component:
+                    axes[i][k][j] = None
+                    continue
 
                 # =========== Plots 1-tensor factors ===========
                 if len(list(components[i][k].shape)) == 2:
@@ -102,8 +109,8 @@ def plot(model,
 
                     if p:
                         ax.imshow(current_component, aspect=aspect, cmap=(cmap if cmap is not None else 'inferno'),
-                                  vmin=np.quantile(current_component,1-quantile),
-                                  vmax=np.quantile(current_component,quantile))
+                                  vmin=np.quantile(components[i][k],1-quantile),
+                                  vmax=np.quantile(components[i][k],quantile))
                     else:
                         min_max = np.quantile(np.abs(current_component),quantile)
                         ax.imshow(current_component, aspect=aspect, cmap=(cmap if cmap is not None else 'seismic'),
