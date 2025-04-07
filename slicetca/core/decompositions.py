@@ -74,18 +74,20 @@ def set_loss(loss_fn, has_mask):
     return loss_calc
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
-    return loss_fn(X, X_hat)[mask].mean()
+    X_mask = torch.where(mask, X, 0)
+    X_hat_mask = torch.where(mask, X_hat, 0)
+    return loss_fn(X_mask, X_hat_mask).sum(dtype=torch.float32) / mask.sum(dtype=torch.float32)
 
 def loss_fn_no_mask(X, X_hat, mask, loss_fn):
     return loss_fn(X, X_hat).mean()
 
 def loss_fn_sum_with_mask(X, X_hat, mask, loss_fn):
-    X_mask = X * mask
-    X_hat_mask = X_hat * mask
+    X_mask = torch.where(mask, X, 0)
+    X_hat_mask = torch.where(mask, X_hat, 0)
     return loss_fn(X_mask, X_hat_mask) / mask.sum(dtype=torch.float32)
 
 def loss_fn_mean_with_mask(X, X_hat, mask, loss_fn):
-    return loss_fn(X[mask], X_hat[mask.squeeze()])
+    return loss_fn(X[mask], X_hat[mask])
 
 class PartitionTCA(pl.LightningModule):
 
@@ -312,25 +314,24 @@ class PartitionTCA(pl.LightningModule):
 
     def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        loss = self._loss_calc(X, self.construct(), mask)
-        self.losses.append(loss.item())
+        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
+        self.log_dict({"train_loss": loss}, prog_bar=True, logger=True,
+                      add_dataloader_idx=False, sync_dist=True)
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
         X, mask = batch
-        loss = self._loss_calc(X, self.construct(), mask)
+        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
         to_log = {"val_loss": loss}
-        if len(self.losses) > 0:
-            to_log["train_loss"] = self.losses[-1]
-            self.losses[-1] = loss.item()
-        self.log_dict(to_log, on_epoch=True, prog_bar=True, logger=True,
+        self.log_dict(to_log, prog_bar=True, logger=True,
                       add_dataloader_idx=False, sync_dist=True)
+        self.losses.append(loss.item())
         return loss
 
     def configure_optimizers(self):
-        eps = 1e-8 if self.dtype != torch.float16 else 1e-7
+        eps = 1e-9 if self.dtype != torch.float16 else 1e-7
         if self._weight_decay is None:
-            optimizer = torch.optim.RMSprop(self.parameters(), self._lr, eps=eps)
+            optimizer = torch.optim.Adagrad(self.parameters(), self._lr, eps=eps)
         else:
             optimizer = torch.optim.RMSprop(self.parameters(), self._lr, eps=eps,
                                           weight_decay=self._weight_decay)

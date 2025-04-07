@@ -21,7 +21,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               initialization: str = 'uniform',
               learning_rate: float = 5 * 10 ** -3,
               batch_dim: int = None,
-              shuffle_dim: int | tuple[int] = 0,
+              shuffle_dim: int | tuple[int] = (),
               max_iter: int = 10000,
               min_iter: int = 10,
               min_std: float = None,
@@ -92,8 +92,8 @@ def decompose(data: Union[torch.Tensor, np.array],
         batch_num = 1
         inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim,  False)
     else:
-        batch_num = data.shape[batch_dim] if batch_dim is not None else 1
-        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop,  False)
+        batch_num = 1.0 if batch_dim is not None else 1
+        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, False)
 
     profiler, detect_anomaly = handle_verbosity(verbose)
 
@@ -107,8 +107,8 @@ def decompose(data: Union[torch.Tensor, np.array],
             early_stop_callback = EarlyStopping(monitor="val_loss", verbose=False, patience=min_iter)
             cb = [early_stop_callback]
 
-        if progress_bar:
-            cb.append(LitProgressBar(leave=True))
+        # if progress_bar:
+        #     cb.append(LitProgressBar(leave=True))
 
         # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
@@ -212,9 +212,9 @@ def handle_device(dev, data, mask, model, compile):
     else:
         device = 'cpu'
 
-    data.to(device)
-    if mask is not None:
-        mask.to(device)
+    # data.to(device)
+    # if mask is not None:
+    #     mask.to(device)
 
     model.set_loss(mask)
 

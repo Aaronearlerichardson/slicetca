@@ -6,12 +6,11 @@ from torch.utils.data import DataLoader, IterableDataset
 
 class BatchedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, dim: int,
-                 shuffle_dim = (0,), mask: torch.Tensor = None,
+                 shuffle_dim = (), mask: torch.Tensor = None,
                  n_folds: int = 5, prop: float = 1.0, test: bool = False):
         super().__init__()
 
         self.batch_dim = dim
-        self.batch_size = 1 if dim is None else data.shape[dim]
         self.shuffle_dims = shuffle_dim if isinstance(shuffle_dim, tuple) else (shuffle_dim,)
         self.n_folds = n_folds
         self.prop = prop
@@ -61,18 +60,21 @@ class BatchedData(L.LightningDataModule):
             assert hasattr(self, "train_data")
 
     def train_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.train_data, self.train_mask, self.prop, self.batch_dim, self.shuffle_dims),
-                          batch_size=1)
+        return DataLoader(CustomIterableDataset(self.train_data, self.train_mask, self.prop, self.batch_dim,
+                                                self.shuffle_dims),)
+                          # batch_size = self.train_data.shape[self.batch_dim])
 
     def val_dataloader(self):
-        return DataLoader(CustomIterableDataset(self.val_data, self.val_mask, 1., self.batch_dim, self.shuffle_dims),
-                          batch_size=1)
+        return DataLoader(CustomIterableDataset(self.val_data, self.val_mask, 1., self.batch_dim,
+                                                self.shuffle_dims),)
+                          # batch_size = self.val_data.shape[self.batch_dim])
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
-        return DataLoader(CustomIterableDataset(self.test_data, self.test_mask, 1., self.batch_dim, self.shuffle_dims),
-                          batch_size=1)
+        return DataLoader(CustomIterableDataset(self.test_data, self.test_mask, 1., self.batch_dim,
+                                                self.shuffle_dims),)
+                          # batch_size = self.test_data.shape[self.batch_dim])
 
 class MaskedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, mask: torch.Tensor = None,
@@ -140,7 +142,7 @@ class MaskedData(L.LightningDataModule):
                           batch_size=None)
 
 class CustomIterableDataset(IterableDataset):
-    def __init__(self, data, mask, batch_prop=1.0, batch_dim=None, shuffle_dims=(0,)):
+    def __init__(self, data, mask, batch_prop=1.0, batch_dim=None, shuffle_dims=()):
         assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
         assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
         self.data = data
@@ -148,7 +150,6 @@ class CustomIterableDataset(IterableDataset):
         self.batch_prop = batch_prop
         self.batch_dim = batch_dim
         self.shuffle_dims = shuffle_dims
-        self.gen = torch.Generator(device=self.data.device.type)
 
     def __iter__(self):
         if self.batch_prop < 1.0 and self.batch_dim is None:
@@ -161,6 +162,12 @@ class CustomIterableDataset(IterableDataset):
             yield from self.__iter4()
         else:
             raise ValueError("Invalid combination of batch_prop and batch_dim")
+
+    def __len__(self):
+        if self.batch_dim is None:
+            return 1
+        else:
+            return self.data.shape[self.batch_dim]
 
     def __iter1(self):
         """Batch_prop < 1.0, batch_dim is None"""
@@ -216,7 +223,7 @@ class CustomIterableDataset(IterableDataset):
         """Shuffle the data and mask along the specified dimensions."""
         shuffle_slice = [slice(None)] * self.data.ndim
         perms = mult(self.data.shape[self.batch_dim],
-                     (self.data.shape[dim], self.data.shape[self.batch_dim]), self.gen)
+                     (self.data.shape[dim], self.data.shape[self.batch_dim]))
         for i in range(self.data.shape[dim]):
             shuffle_slice[dim] = i
             perm_slice = shuffle_slice.copy()
@@ -232,11 +239,11 @@ def handle_data(data, mask=None):
         mask = torch.as_tensor(mask)
     return data, mask
 
-def mult(pop_size, shape, generator, replacement=True):
+def mult(pop_size, shape, replacement=True):
     """Use torch.Tensor.multinomial to generate indices on a GPU tensor."""
     num_samples = 1
     for s in shape:
         num_samples *= s
-    p = torch.ones(pop_size, device=generator.device) / pop_size
-    out = p.multinomial(num_samples=num_samples, replacement=replacement, generator=generator)
+    p = torch.ones(pop_size) / pop_size
+    out = p.multinomial(num_samples=num_samples, replacement=replacement)
     return out.reshape(shape)
