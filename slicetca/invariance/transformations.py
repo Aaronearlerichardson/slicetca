@@ -1,4 +1,4 @@
-from .helper import *
+from slicetca.invariance.helper import *
 
 from itertools import combinations
 import torch
@@ -100,3 +100,31 @@ class TransformationWithin(nn.Module):
                 components[i][1] = mm(torch.linalg.inv(self.free_gl[i]), components[i][1])
 
         return components
+
+
+if __name__ == "__main__":
+    import torch
+    from slicetca.core.decompositions import TCA, SliceTCA
+    from slicetca.invariance.analytic_invariance import svd_basis
+    from slicetca.invariance.helper import construct_per_type, construct_per_component
+
+    model = TCA([10, 10, 10], 5, positive=True,
+                     initialization="uniform-positive", dtype=torch.float64)
+    model.to('cuda')
+    # model = svd_basis(model)
+    components = model.get_components()
+
+    # transformation_between = TransformationBetween(model)
+    transformation_within = TransformationWithin(model)
+
+    # components = transformation_between(components)
+    components = transformation_within(components)
+
+    # reconstructed = construct_per_type(model, components)
+    reconstructed = construct_per_component(model, components)
+
+    out = model()
+    print(reconstructed)
+    print(model.get_components())
+    print(model.get_vectors())
+    print(model.get_slices())

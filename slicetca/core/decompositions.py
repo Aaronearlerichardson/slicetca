@@ -331,9 +331,14 @@ class PartitionTCA(pl.LightningModule):
     def configure_optimizers(self):
         eps = 1e-9 if self.dtype != torch.float16 else 1e-7
         if self._weight_decay is None:
-            optimizer = torch.optim.Adagrad(self.parameters(), self._lr, eps=eps)
+            optimizer = torch.optim.AdamW(self.parameters(), self._lr, eps=eps)
+        elif callable(self._weight_decay):
+            optimizer = self._weight_decay(self.parameters(), self._lr)
+        elif issubclass(type(self._weight_decay), torch.optim.Optimizer):
+            optimizer = type(self._weight_decay)(self.parameters(), self._lr)
         else:
-            optimizer = torch.optim.RMSprop(self.parameters(), self._lr, eps=eps,
+            optimizer = torch.optim.AdamW(self.parameters(), self._lr, eps=eps,
+                                                # momentum=0.9, centered=True,
                                           weight_decay=self._weight_decay)
         if self._threshold is None:
             return optimizer
