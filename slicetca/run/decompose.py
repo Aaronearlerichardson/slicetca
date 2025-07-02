@@ -1,3 +1,4 @@
+import os
 from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
 
 from slicetca.core import SliceTCA, TCA
@@ -36,7 +37,8 @@ def decompose(data: Union[torch.Tensor, np.array],
               loss_function: callable = None,
               device: str = None,
               verbose: int = 0,
-              compile: bool = False) -> (list, Union[SliceTCA, TCA]):
+              compile: bool = False,
+              log_dir: str = None) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -61,6 +63,9 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if seed is not None:
         pl.seed_everything(seed, workers=True)
+
+    if log_dir is None:
+        log_dir = os.getcwd()
 
     if isinstance(data, np.ndarray): data = torch.tensor(data)
     elif not isinstance(data, torch.Tensor):
@@ -126,7 +131,7 @@ def decompose(data: Union[torch.Tensor, np.array],
                              # accumulate_grad_batches=30,
                              # precision='auto',
                              deterministic=True if seed is not None else False,
-                             # reload_dataloaders_every_n_epochs=max_iter,
+                             default_root_dir=log_dir
                              )
         true_prop = 1 - (1 - batch_prop) ** i
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop

@@ -1,6 +1,6 @@
 import torch
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch import nn, optim, jit
+from torch import nn, optim
 import numpy as np
 from collections.abc import Iterable
 
@@ -287,7 +287,10 @@ class PartitionTCA(pl.LightningModule):
         for i in range(len(self.vectors)):
             for j in range(len(self.vectors[i])):
                 if numpy:
-                    temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
+                    if self.vectors[i][j].itemsize == 2:
+                        temp[i].append(self.positive_function(self.vectors[i][j]).data.to(torch.float16).detach().cpu().numpy())
+                    else:
+                        temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
                 else:
                     if not detach: temp[i].append(self.positive_function(self.vectors[i][j]).data.detach())
                     else: temp[i].append(self.positive_function(self.vectors[i][j]).data)
