@@ -39,6 +39,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               verbose: int = 0,
               compile: bool = False,
               regularization: str = None,
+              dtype: torch.dtype = None,
               **kwargs) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
@@ -84,8 +85,10 @@ def decompose(data: Union[torch.Tensor, np.array],
     if min_std is not None:
         min_std *= 2
         iter_std //= 2
+    if dtype is None:
+        dtype = data.dtype
     model = decomposition(dimensions, number_components, positive,
-                          initialization, dtype=data.dtype, lr=learning_rate,
+                          initialization, dtype=dtype, lr=learning_rate,
                           weight_decay=weight_decay, loss=loss_function,
                           init_bias=init_bias, threshold=min_std,
                           patience=iter_std)
