@@ -38,6 +38,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               device: str = None,
               verbose: int = 0,
               compile: bool = False,
+              regularization: str = None,
               **kwargs) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
@@ -112,7 +113,8 @@ def decompose(data: Union[torch.Tensor, np.array],
         # if progress_bar:
         #     cb.append(LitProgressBar(leave=True))
 
-        invariance(model, L2='L2', L3=None, max_iter=1000, iter_std=10)
+        if regularization is not None:
+            invariance(model, L2=regularization, L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
                              accelerator='auto' if device == 'xpu' else device,
                              strategy=slicetca.run.utils.SingleXPUStrategy() if device == 'xpu' else 'auto',
