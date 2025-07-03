@@ -97,7 +97,13 @@ class TransformationWithin(nn.Module):
         for i in range(self.number_components):
             if self.ranks[i] != 0:
                 components[i][0] = mm(self.free_gl[i].T, components[i][0])
-                components[i][1] = mm(torch.linalg.inv(self.free_gl[i]), components[i][1])
+                if self.free_gl[i].itemsize < 4:
+                    inv = torch.linalg.inv(
+                        self.free_gl[i].to(torch.float32)
+                    ).to(components[i][1].dtype)
+                else:
+                    inv = torch.linalg.inv(self.free_gl[i])
+                components[i][1] = mm(inv, components[i][1])
 
         return components
 

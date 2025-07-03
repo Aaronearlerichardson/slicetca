@@ -85,7 +85,7 @@ def construct_per_component(model: SliceTCA, components: Sequence[Sequence[torch
 def construct_single_component(model: SliceTCA, components: Sequence[Sequence[torch.Tensor]], partition: int, k: int,
                                ignore: tuple = ()):
 
-    temp2 = [model.positive_function[partition][q](components[partition][q][k])
+    temp2 = [model.positive_function(components[partition][q][k])
              for q in range(len(components[partition])) if q not in ignore]
     if len(ignore) == 0:
         formula = model.einsums[partition]

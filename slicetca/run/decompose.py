@@ -1,9 +1,9 @@
-import os
 from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
 
 from slicetca.core import SliceTCA, TCA
 from slicetca.core.helper_functions import poisson_log_likelihood
 from slicetca.run.data import BatchedData, MaskedData
+from slicetca.invariance.invariance import invariance
 import slicetca.run.utils
 from typing import Any
 
@@ -38,7 +38,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               device: str = None,
               verbose: int = 0,
               compile: bool = False,
-              log_dir: str = None) -> (list, Union[SliceTCA, TCA]):
+              **kwargs) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
 
@@ -63,9 +63,6 @@ def decompose(data: Union[torch.Tensor, np.array],
 
     if seed is not None:
         pl.seed_everything(seed, workers=True)
-
-    if log_dir is None:
-        log_dir = os.getcwd()
 
     if isinstance(data, np.ndarray): data = torch.tensor(data)
     elif not isinstance(data, torch.Tensor):
@@ -115,23 +112,19 @@ def decompose(data: Union[torch.Tensor, np.array],
         # if progress_bar:
         #     cb.append(LitProgressBar(leave=True))
 
-        # invariance(model, L2='orthogonality', L3=None, max_iter=1000, iter_std=10)
+        invariance(model, L2='L2', L3=None, max_iter=1000, iter_std=10)
         trainer = pl.Trainer(max_epochs=max_iter, min_epochs=min_iter,
                              accelerator='auto' if device == 'xpu' else device,
-                             # strategy='ddp' if torch.cuda.is_available() else None,
                              strategy=slicetca.run.utils.SingleXPUStrategy() if device == 'xpu' else 'auto',
                              limit_train_batches=batch_num,
                              limit_val_batches=batch_num,
                              enable_progress_bar=progress_bar,
                              enable_model_summary=detect_anomaly,
                              enable_checkpointing=False,
-                             # gradient_clip_val=0.5,
                              callbacks=cb, profiler=profiler,
                              detect_anomaly=detect_anomaly,
-                             # accumulate_grad_batches=30,
-                             # precision='auto',
                              deterministic=True if seed is not None else False,
-                             default_root_dir=log_dir
+                             **kwargs
                              )
         true_prop = 1 - (1 - batch_prop) ** i
         inputs.prop = 1. if true_prop > .9 or i == batch_prop_decay else true_prop

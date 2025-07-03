@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
+from slicetca.invariance.criteria import orthogonality_component_type_wise
 import lightning.pytorch as pl
 import functools
 
@@ -207,6 +208,22 @@ class PartitionTCA(pl.LightningModule):
 
     def error(self, X, mask=None, axis=None):
         return error(X, self.construct(), mask, axis)
+
+    def skewness(self, partition: int):
+        """
+        Computes the skewness of the components of a given partition.
+
+        :param partition: Type of the partition
+        :return: Skewness of the components
+        """
+        # return torch.tensor([torch.mean(self.vectors[partition][i].pow(3)) / torch.mean(self.vectors[partition][i].pow(2)).pow(1.5)
+        #                      for i in range(len(self.vectors[partition]))])
+        return (self.vectors[partition][0]
+                - torch.mean(self.vectors[partition][0])).pow(2).max().sqrt()
+
+    def orthogonality(self, partition: int):
+        return orthogonality_component_type_wise(
+            self.positive_function(self.vectors[partition][1]))
 
     def set_einsums(self):
 

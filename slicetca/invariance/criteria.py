@@ -127,3 +127,21 @@ def soft_arg_max(A, mask=None, beta=10, dim=0, epsilon=1e-12):
     indices = torch.arange(start=0, end=A.size()[dim]).float()
     # print(indices.size(), A_softmax.size())
     return torch.matmul(A_softmax, indices)
+
+def skewness(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor]):
+    """
+    Penalizes skewness of the reconstructed tensors of each partition/slicing.
+
+    :param reconstructed_tensors_of_each_partition: The sum of the terms of a given partition/slicing.
+    :return: Torch float.
+    """
+    l = 0
+    for t in reconstructed_tensors_of_each_partition:
+        mean = t.mean()
+        std = t.std()
+        skew = ((t - mean) ** 3).mean() / (std ** 3 + 1e-12)
+        l += skew
+    return l
+
+def model_ortho(model):
+    return model.orthogonality()
