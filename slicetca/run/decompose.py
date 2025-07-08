@@ -40,6 +40,7 @@ def decompose(data: Union[torch.Tensor, np.array],
               compile: bool = False,
               regularization: str = None,
               dtype: torch.dtype = None,
+              testing: bool = False,
               **kwargs) -> (list, Union[SliceTCA, TCA]):
     """
     High-level function to decompose a data tensor into a SliceTCA or TCA decomposition.
@@ -99,7 +100,7 @@ def decompose(data: Union[torch.Tensor, np.array],
         inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim,  False)
     else:
         batch_num = 1.0 if batch_dim is not None else 1
-        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, False)
+        inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, testing)
 
     profiler, detect_anomaly = handle_verbosity(verbose)
 

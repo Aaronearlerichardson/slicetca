@@ -125,13 +125,17 @@ def decompose_mp(number_components_seed, data, mask_train, mask_test, verbose,
         progress_bar = False if verbose == 0 else True
         _, model = decompose(data, number_components, mask=mask_train,
                              verbose=verbose, progress_bar=progress_bar, *args,
-                             seed=seed,loss_function=loss_function, **kwargs)
+                             seed=seed,loss_function=loss_function,
+                             testing=True, **kwargs)
         data_hat = model.construct()
         if data_hat.device != data.device:
             data_hat = data_hat.to(data.device)
 
     if mask_test is not None:
         loss = model._loss_calc(data, data_hat, mask_test)
+    elif 'batch_dim' in kwargs and kwargs['batch_dim'] is not None:
+        loss = model.trainer.test(datamodule=model.trainer.datamodule,
+                                  ckpt_path='last')[0]['test_loss']
     else:
         loss = model.losses[-1]
 

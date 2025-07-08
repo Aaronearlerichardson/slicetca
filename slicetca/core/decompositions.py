@@ -304,10 +304,10 @@ class PartitionTCA(pl.LightningModule):
         for i in range(len(self.vectors)):
             for j in range(len(self.vectors[i])):
                 if numpy:
-                    if self.vectors[i][j].itemsize == 2:
-                        temp[i].append(self.positive_function(self.vectors[i][j]).data.to(torch.float16).detach().cpu().numpy())
-                    else:
-                        temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
+                    # if self.vectors[i][j].itemsize == 2:
+                    #     temp[i].append(self.positive_function(self.vectors[i][j]).data.to(torch.float16).detach().cpu().numpy())
+                    # else:
+                    temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
                 else:
                     if not detach: temp[i].append(self.positive_function(self.vectors[i][j]).data.detach())
                     else: temp[i].append(self.positive_function(self.vectors[i][j]).data)
@@ -346,6 +346,14 @@ class PartitionTCA(pl.LightningModule):
         self.log_dict(to_log, prog_bar=True, logger=True,
                       add_dataloader_idx=False, sync_dist=True)
         self.losses.append(loss.item())
+        return loss
+
+    def test_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
+        X, mask = batch
+        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
+        to_log = {"test_loss": loss}
+        self.log_dict(to_log, prog_bar=False, logger=True,
+                      add_dataloader_idx=False, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
