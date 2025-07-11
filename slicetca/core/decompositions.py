@@ -94,11 +94,11 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     """
     dims = tuple(range(mask.ndim))
     mask_batch = mask.all(dims[1:])
-    X_masked = X[mask_batch]#.reshape(-1, X.shape[-1], 1)
-    X_hat_masked = X_hat[mask_batch]#.reshape(-1, X_hat.shape[-1], 1)
-    # new_order =  dims[2:] + dims[:1] + (1,)
-    # X_masked = X[mask_batch].permute(*new_order).reshape(X.shape[0], X.shape[-1], 1)
-    # X_hat_masked = X_hat[mask_batch].permute(*new_order).reshape(X.shape[0], X_hat.shape[-1], 1)
+    # X_masked = X[mask_batch].reshape(X.shape[-1], -1)
+    # X_hat_masked = X_hat[mask_batch].reshape(X_hat.shape[-1], -1)
+    new_order = dims[-1:] + dims[:-1]
+    X_masked = X[mask_batch].permute(*new_order).reshape(1, X.shape[-1], -1)
+    X_hat_masked = X_hat[mask_batch].permute(*new_order).reshape(1, X_hat.shape[-1], -1)
     return loss_fn(X_masked, X_hat_masked).mean()
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
