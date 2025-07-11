@@ -51,9 +51,22 @@ def error(X, X_hat, mask=None, axis=None):
     count_non_masked = mask.sum(dim=axis)
     return diff_masked.abs().sum(axis) / count_non_masked
 
+def is_from_tslearn_metrics(func):
+    orig_func = func
+    while isinstance(orig_func, functools.partial):
+        orig_func = orig_func.func
+    return getattr(orig_func, '__module__', '').startswith('tslearn.metrics')
 
 def set_loss(loss_fn, has_mask):
-    if loss_fn.reduction == 'none':
+
+    if is_from_tslearn_metrics(loss_fn):
+        if has_mask: # mask must be consistent accross time
+            loss_calc = functools.partial(loss_fn_dtw_mask,
+                                          loss_fn=loss_fn)
+        else:
+            loss_calc = functools.partial(loss_fn_no_mask,
+                                          loss_fn=loss_fn)
+    elif loss_fn.reduction == 'none':
         if has_mask:
             loss_calc = functools.partial(loss_fn_with_mask, loss_fn=loss_fn)
         else:
@@ -73,6 +86,20 @@ def set_loss(loss_fn, has_mask):
         raise ValueError('Invalid reduction method for loss function.')
 
     return loss_calc
+
+def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
+    """
+    Computes the DTW loss with a mask applied to the input tensors.
+    The mask is used to ignore certain elements in the loss calculation.
+    """
+    dims = tuple(range(mask.ndim))
+    mask_batch = mask.all(dims[1:])
+    X_masked = X[mask_batch]#.reshape(-1, X.shape[-1], 1)
+    X_hat_masked = X_hat[mask_batch]#.reshape(-1, X_hat.shape[-1], 1)
+    # new_order =  dims[2:] + dims[:1] + (1,)
+    # X_masked = X[mask_batch].permute(*new_order).reshape(X.shape[0], X.shape[-1], 1)
+    # X_hat_masked = X_hat[mask_batch].permute(*new_order).reshape(X.shape[0], X_hat.shape[-1], 1)
+    return loss_fn(X_masked, X_hat_masked).mean()
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
