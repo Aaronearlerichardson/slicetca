@@ -94,12 +94,25 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     """
     dims = tuple(range(mask.ndim))
     mask_batch = mask.all(dims[1:])
-    # X_masked = X[mask_batch].reshape(X.shape[-1], -1)
-    # X_hat_masked = X_hat[mask_batch].reshape(X_hat.shape[-1], -1)
-    new_order = dims[-1:] + dims[:-1]
-    X_masked = X[mask_batch].permute(*new_order).reshape(1, X.shape[-1], -1)
-    X_hat_masked = X_hat[mask_batch].permute(*new_order).reshape(1, X_hat.shape[-1], -1)
-    return loss_fn(X_masked, X_hat_masked).mean()
+    if X.ndim == 2:
+        X_masked = X[mask_batch].reshape(-1, X.shape[-1], 1)
+        X_hat_masked = X_hat[mask_batch].reshape(-1, X_hat.shape[-1], 1)
+    elif X.ndim == 3:
+        new_order = (0, 2, 1)
+        X_masked = X[mask_batch].permute(*new_order)
+        X_hat_masked = X_hat[mask_batch].permute(*new_order)
+    else:
+        raise ValueError("Unsupported number of dimensions for X and X_hat. Expected 2 or 3, got {}".format(X.ndim))
+
+    batch_size = 50
+    batch_loss = 0
+    for i in range(0, X_masked.shape[0], batch_size):
+        X_batch = X_masked[i:i + batch_size]
+        X_hat_batch = X_hat_masked[i:i + batch_size]
+        batch_loss += loss_fn(X_batch, X_hat_batch).sum()
+    final_loss = batch_loss / (X_masked.shape[0] * X_masked.shape[2])
+    return final_loss
+    # return loss_fn(X_masked, X_hat_masked).mean() / X_masked.shape[2]
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
