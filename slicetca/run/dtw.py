@@ -289,7 +289,8 @@ class SoftDTW(pl.LightningModule):
     The soft DTW implementation that optionally supports CUDA
     """
 
-    def __init__(self, use_cuda, gamma=1.0, normalize=False, bandwidth=None, dist_func=None):
+    def __init__(self, use_cuda, gamma=1.0, normalize=False, bandwidth=None,
+        dist_func=torch.nn.MSELoss(reduction='none')):
         """
         Initializes a new instance using the supplied parameters
         :param use_cuda: Flag indicating whether the CUDA implementation should be used
@@ -306,10 +307,15 @@ class SoftDTW(pl.LightningModule):
         self.use_cuda = use_cuda
 
         # Set the distance function
-        if dist_func is not None:
-            self.dist_func = dist_func
-        else:
-            self.dist_func = SoftDTW._euclidean_dist_func
+        self.dist_func = SoftDTW._get_broadcasted_pairwise_dist(
+            dist_func, self.bandwidth)
+        # if self.use_cuda:
+        #     ex_input = torch.randn(2, 5, 3).cuda()
+        # else:
+        #     ex_input = torch.randn(2, 5, 3)
+        # self.dist_func = torch.jit.trace(self.dist_func, (ex_input, ex_input))  # Warm up
+        #     self.dist_func.cuda()
+        # self.dist_func.compile()
 
     def _get_func_dtw(self, x, y):
         """
@@ -331,16 +337,57 @@ class SoftDTW(pl.LightningModule):
         return _SoftDTWCUDA.apply if use_cuda else _SoftDTW.apply
 
     @staticmethod
-    def _euclidean_dist_func(x, y):
+    def _get_broadcasted_pairwise_dist(dist_func: callable, bandwidth: int):
         """
         Calculates the Euclidean distance between each element in x and y per timestep
         """
-        n = x.size(1)
-        m = y.size(1)
-        d = x.size(2)
-        x = x.unsqueeze(2).expand(-1, n, m, d)
-        y = y.unsqueeze(1).expand(-1, n, m, d)
-        return torch.pow(x - y, 2).sum(3)
+
+        def dist_band(a, b):
+            # a, b: (batch, n, d), (batch, m, d)
+            B, n, d = a.shape
+            m = b.size(1)
+            device = a.device
+            dtype = a.dtype
+
+            band_width_px = int(bandwidth * m / n)
+
+            # Step 1: Make mask for (n, m)
+            i_idx = torch.arange(n, device=device).unsqueeze(1)
+            j_idx = torch.arange(m, device=device).unsqueeze(0)
+            mask = (j_idx >= (i_idx - band_width_px)) & (
+                        j_idx <= (i_idx + band_width_px))  # (n, m)
+
+            # Step 2: Get all valid (i, j) indices
+            i_valid, j_valid = mask.nonzero(
+                as_tuple=True)  # Each is (num_pairs,)
+
+            # Step 3: Gather the relevant rows from a and b
+            # Shapes: (B, num_pairs, d)
+            a_gather = a[:, i_valid, :]
+            b_gather = b[:, j_valid, :]
+
+            # Step 4: Compute distances only for valid pairs
+            dist_vals = dist_func(a_gather, b_gather).sum(
+                dim=-1)  # (B, num_pairs)
+
+            # Step 5: Scatter back into the (B, n, m) result
+            D = torch.full((B, n, m), float('inf'), device=device, dtype=dtype)
+            D[:, i_valid, j_valid] = dist_vals
+
+            return D
+
+        def func(x, y):
+            n = x.size(1)
+            m = y.size(1)
+            d = x.size(2)
+            x = x.unsqueeze(2).expand(-1, n, m, d)
+            y = y.unsqueeze(1).expand(-1, n, m, d)
+            return dist_func(x, y).sum(3)
+
+        if bandwidth == 0:
+            return func
+        else:
+            return dist_band
 
     def forward(self, X, Y):
         """

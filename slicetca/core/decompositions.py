@@ -101,6 +101,10 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
         new_order = (0, 2, 1)
         X_masked = X[mask_batch].permute(*new_order)
         X_hat_masked = X_hat[mask_batch].permute(*new_order)
+    elif X.ndim == 4:
+        new_order = (0, 2, 1)
+        X_masked = X[mask_batch].reshape(-1, X.shape[-2], X.shape[-1]).permute(*new_order)
+        X_hat_masked = X_hat[mask_batch].reshape(-1, X.shape[-2], X.shape[-1]).permute(*new_order)
     else:
         raise ValueError("Unsupported number of dimensions for X and X_hat. Expected 2 or 3, got {}".format(X.ndim))
 
