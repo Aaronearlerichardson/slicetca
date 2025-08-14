@@ -53,11 +53,11 @@ def error(X, X_hat, mask=None, axis=None):
 
 def is_from_tslearn_metrics(func):
     orig_func = func
-    from slicetca.run.dtw import SoftDTW
+    # from slicetca.run.dtw import SoftDTW
     while isinstance(orig_func, functools.partial):
         orig_func = orig_func.func
-    if isinstance(orig_func, SoftDTW):
-        return True
+    # if isinstance(orig_func, SoftDTW):
+    #     return True
     return getattr(orig_func, '__module__', '').startswith('tslearn.metrics')
 
 def set_loss(loss_fn, has_mask):
@@ -111,15 +111,15 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     else:
         raise ValueError("Unsupported number of dimensions for X and X_hat. Expected 2 or 3, got {}".format(X.ndim))
 
-    # batch_size = 50
-    # batch_loss = 0
-    # for i in range(0, X_masked.shape[0], batch_size):
-    #     X_batch = X_masked[i:i + batch_size]
-    #     X_hat_batch = X_hat_masked[i:i + batch_size]
-    #     batch_loss += loss_fn(X_batch, X_hat_batch).sum()
-    # final_loss = batch_loss / (X_masked.shape[0] * X_masked.shape[2])
-    # return final_loss
-    return loss_fn(X_masked, X_hat_masked).sum() / (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
+    batch_size = 50
+    batch_loss = 0
+    for i in range(0, X_masked.shape[0], batch_size):
+        X_batch = X_masked[i:i + batch_size]
+        X_hat_batch = X_hat_masked[i:i + batch_size]
+        batch_loss += loss_fn(X_batch, X_hat_batch).sum()
+    batch_loss /= (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
+    return batch_loss
+    # return loss_fn(X_masked, X_hat_masked).sum() / (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
