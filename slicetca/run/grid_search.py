@@ -104,13 +104,6 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test,
                     checkpoint_data = pickle.load(f)
                 except Exception:
                     checkpoint_data = {}
-        # # Use tuple for hashable key
-        # key = tuple(number_components_seed)
-        # if key in checkpoint_data:
-        #     # Already computed, skip and return stored value
-        #     loss = checkpoint_data[key]
-        #     seeds = np.array([seed])
-        #     return np.array([loss]), seeds
 
     dec = partial(decompose_mp,
                   data=data.clone(),
