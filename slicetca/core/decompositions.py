@@ -8,6 +8,7 @@ from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
 from slicetca.invariance.criteria import orthogonality_component_type_wise
 import lightning.pytorch as pl
+import math
 import functools
 
 
@@ -108,15 +109,15 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     else:
         raise ValueError("Unsupported number of dimensions for X and X_hat. Expected 2 or 3, got {}".format(X.ndim))
 
-    batch_size = 50
-    batch_loss = 0
-    for i in range(0, X_masked.shape[0], batch_size):
-        X_batch = X_masked[i:i + batch_size]
-        X_hat_batch = X_hat_masked[i:i + batch_size]
-        batch_loss += loss_fn(X_batch, X_hat_batch).sum()
-    final_loss = batch_loss / (X_masked.shape[0] * X_masked.shape[2])
-    return final_loss
-    # return loss_fn(X_masked, X_hat_masked).mean() / X_masked.shape[2]
+    # batch_size = 50
+    # batch_loss = 0
+    # for i in range(0, X_masked.shape[0], batch_size):
+    #     X_batch = X_masked[i:i + batch_size]
+    #     X_hat_batch = X_hat_masked[i:i + batch_size]
+    #     batch_loss += loss_fn(X_batch, X_hat_batch).sum()
+    # final_loss = batch_loss / (X_masked.shape[0] * X_masked.shape[2])
+    # return final_loss
+    return loss_fn(X_masked, X_hat_masked).sum() / (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
