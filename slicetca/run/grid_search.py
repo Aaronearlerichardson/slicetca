@@ -6,6 +6,9 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 from tqdm import tqdm
 import torch
 import numpy as np
+import os
+import pickle
+import matplotlib.pyplot as plt
 
 from typing import Sequence, Union
 
@@ -22,6 +25,7 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
                 processes_grid: int = 1,
                 seed: int = 7,
                 verbose: int = 0,
+                checkpoint: str = None,
                 **kwargs):
     """
     Performs a gridsearch over different number of components (ranks) to see which has the lowest cross-validated loss.
@@ -59,7 +63,7 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
           '- Number of models to fit:', torch.tensor(grid).size()[0]*sample_size)
 
     dec = partial(decompose_mp_sample, data=data, mask_train=mask_train, mask_test=mask_test, sample_size=sample_size,
-                  processes_sample=processes_sample, verbose=verbose, **kwargs)
+                  processes_sample=processes_sample, verbose=verbose, checkpoint=checkpoint, **kwargs)
     out_grid = []
     if processes_grid == 1:
         for i in tqdm(range(torch.tensor(grid).size()[0]), desc='Number of components (completed): - '):
@@ -84,12 +88,29 @@ def grid_search(data: Union[torch.Tensor], # Only works with torch.Tensor atm
 
 
 def decompose_mp_sample(number_components_seed, data, mask_train, mask_test,
-                        sample_size, processes_sample, verbose, **kwargs):
+                        sample_size, processes_sample, verbose, checkpoint, **kwargs):
 
     number_components = number_components_seed[:-1]
     seed = number_components_seed[-1]
 
     np.random.seed(seed)
+
+    # Checkpoint logic
+    checkpoint_data = {}
+    if checkpoint is not None and isinstance(checkpoint, str):
+        if os.path.exists(checkpoint):
+            with open(checkpoint, 'rb') as f:
+                try:
+                    checkpoint_data = pickle.load(f)
+                except Exception:
+                    checkpoint_data = {}
+        # # Use tuple for hashable key
+        # key = tuple(number_components_seed)
+        # if key in checkpoint_data:
+        #     # Already computed, skip and return stored value
+        #     loss = checkpoint_data[key]
+        #     seeds = np.array([seed])
+        #     return np.array([loss]), seeds
 
     dec = partial(decompose_mp,
                   data=data.clone(),
@@ -103,11 +124,40 @@ def decompose_mp_sample(number_components_seed, data, mask_train, mask_test,
 
     sample = np.concatenate([sample, seeds[:,np.newaxis]], axis=-1)
     if processes_sample == 1:
-        out = [dec(s) for s in sample]
+        out = []
+        for s, seed_val in zip(sample, seeds):
+            key = tuple(s)
+            if checkpoint is not None and isinstance(checkpoint, str) and key in checkpoint_data:
+                loss = checkpoint_data[key]
+            else:
+                loss = dec(s)
+                if checkpoint is not None and isinstance(checkpoint, str):
+                    checkpoint_data[key] = loss
+                    with open(checkpoint, 'wb') as f:
+                        pickle.dump(checkpoint_data, f)
+                    # Plotting after checkpoint update
+                    try:
+                        # Prepare data for plotting
+                        keys = np.array(list(checkpoint_data.keys()))
+                        losses = np.array(list(checkpoint_data.values()))
+                        if keys.ndim == 2 and keys.shape[1] > 0:
+                            # Only plot the first rank dimension for x-axis if possible
+                            x = [k[0] for k in keys]
+                            plt.figure()
+                            plt.scatter(x, losses, c='k')
+                            plt.xlabel('First rank dimension')
+                            plt.ylabel('Loss')
+                            plt.title('Checkpointed Losses')
+                            plot_path = checkpoint + '.png'
+                            plt.savefig(plot_path)
+                            plt.close()
+                    except Exception as e:
+                        print(e)
+            out.append(loss)
         loss = np.array(out)
     else:
-        with Pool(max_workers=processes_sample) as pool:
-            loss = np.array(list(pool.map(dec, sample)))
+        # For multiprocessing, checkpointing is not thread-safe; skip checkpointing in this mode
+        loss = np.array(list(map(dec, sample)))
 
     return loss, seeds
 
