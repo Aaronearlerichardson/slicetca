@@ -8,7 +8,7 @@ from typing import Any, Sequence, Union, Callable
 from slicetca.core.helper_functions import generate_orthogonal_tensor
 from slicetca.invariance.criteria import orthogonality_component_type_wise
 import lightning.pytorch as pl
-import math
+from slicetca.run.dtw import SoftDTW
 import functools
 
 
@@ -56,6 +56,8 @@ def is_from_tslearn_metrics(func):
     orig_func = func
     while isinstance(orig_func, functools.partial):
         orig_func = orig_func.func
+    if isinstance(orig_func, SoftDTW):
+        return True
     return getattr(orig_func, '__module__', '').startswith('tslearn.metrics')
 
 def set_loss(loss_fn, has_mask):
