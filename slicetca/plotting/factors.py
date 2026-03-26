@@ -6,10 +6,10 @@ from typing import Sequence, Union
 def plot(model,
          components: Sequence[Sequence[np.ndarray]] = None,
          variables: Sequence[str] = ('trial', 'neuron', 'time'),
-         colors: Union[Sequence[np.ndarray], Sequence[Sequence[float]]] = (None, None, None),
-         sorting_indices: Sequence[np.ndarray] = (None, None, None),
-         ticks: Sequence[np.ndarray] = (None, None, None),
-         tick_labels: Sequence[np.ndarray] = (None, None, None),
+         colors: Union[Sequence[np.ndarray], Sequence[Sequence[float]]] = None,
+         sorting_indices: Sequence[np.ndarray] = None,
+         ticks: Sequence[np.ndarray] = None,
+         tick_labels: Sequence[np.ndarray] = None,
          ignore_component: tuple = (),
          quantile: float = 0.95,
          factor_height: int = 2,
@@ -44,6 +44,14 @@ def plot(model,
     """
 
     components = model.get_components(numpy=True) if components is None else components
+    if colors is None:
+        colors = [None for _ in range(len(model.dimensions))]
+    if sorting_indices is None:
+        sorting_indices = [None for _ in range(len(model.dimensions))]
+    if ticks is None:
+        ticks = [None for _ in range(len(model.dimensions))]
+    if tick_labels is None:
+        tick_labels = [None for _ in range(len(model.dimensions))]
     partitions = model.partitions
     positive = model.positive
     ranks = model.ranks

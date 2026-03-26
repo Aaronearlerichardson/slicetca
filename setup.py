@@ -20,7 +20,8 @@ setup(
                       'numpy',
                       'matplotlib',
                       'tqdm',
-                      'scipy'
+                      'scipy',
+                      'lightning'
                       ],
     python_requires='>=3.8',
     classifiers=[

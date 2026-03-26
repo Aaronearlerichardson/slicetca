@@ -2,12 +2,14 @@ import lightning as L
 import torch
 from slicetca.run.utils import block_mask
 from torch.utils.data import DataLoader, IterableDataset
+import numpy as np
 
 
 class BatchedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, dim: int,
                  shuffle_dim = (), mask: torch.Tensor = None,
-                 n_folds: int = 5, prop: float = 1.0, test: bool = False):
+                 n_folds: int = 5, prop: float = 1.0, test: bool = False,
+                 avg_batches: int = 1):
         super().__init__()
 
         self.batch_dim = dim
@@ -15,6 +17,9 @@ class BatchedData(L.LightningDataModule):
         self.n_folds = n_folds
         self.prop = prop
         self.test = test
+        if not isinstance(avg_batches, int) or avg_batches < 1:
+            raise ValueError("avg_batches must be an integer >= 1")
+        self.avg_batches = avg_batches
         data, mask = handle_data(data, mask)
         self.dims = data.shape
         self.data = data
@@ -61,25 +66,25 @@ class BatchedData(L.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(CustomIterableDataset(self.train_data, self.train_mask, self.prop, self.batch_dim,
-                                                self.shuffle_dims),)
+                                                self.shuffle_dims, self.avg_batches),)
                           # batch_size = self.train_data.shape[self.batch_dim])
 
     def val_dataloader(self):
         return DataLoader(CustomIterableDataset(self.val_data, self.val_mask, 1., self.batch_dim,
-                                                self.shuffle_dims),)
+                                                self.shuffle_dims, self.avg_batches),)
                           # batch_size = self.val_data.shape[self.batch_dim])
 
     def test_dataloader(self):
         if not self.test:
             raise ValueError("No test data")
         return DataLoader(CustomIterableDataset(self.test_data, self.test_mask, 1., self.batch_dim,
-                                                self.shuffle_dims),)
+                                                self.shuffle_dims, self.avg_batches),)
                           # batch_size = self.test_data.shape[self.batch_dim])
 
 class MaskedData(L.LightningDataModule):
     def __init__(self, data: torch.Tensor, mask: torch.Tensor = None,
                  n_folds: int = 5, prop: float = 1.0, shuffle_dims = (0,),
-                 test: bool = False):
+                 test: bool = False, blocklength: int = 10):
         super().__init__()
 
         self.shuffle_dims = shuffle_dims if isinstance(shuffle_dims, tuple) else (shuffle_dims,)
@@ -92,6 +97,7 @@ class MaskedData(L.LightningDataModule):
         if mask is None:
             mask = torch.ones_like(data, dtype=torch.bool)
         self.mask = mask
+        self.blocklength = blocklength
 
     def prepare_data(self) -> None:
         self.val_mask = torch.empty_like(self.mask, dtype=torch.bool)
@@ -101,8 +107,8 @@ class MaskedData(L.LightningDataModule):
     def setup(self, stage: str) -> None:
         if stage == "fit":
             n_folds = self.n_folds
-            train_dim = tuple(1 if i in self.shuffle_dims else 10 for i in range(self.data.ndim))
-            test_dim = tuple(1 if i in self.shuffle_dims else 5 for i in range(self.data.ndim))
+            train_dim = tuple(1 if i in self.shuffle_dims else self.blocklength for i in range(self.data.ndim))
+            test_dim = tuple(1 if i in self.shuffle_dims else self.blocklength // 2 for i in range(self.data.ndim))
             if self.test:
                 train_mask1, test_mask = block_mask(dimensions=self.mask.shape,
                                                     train_blocks_dimensions=train_dim,
@@ -142,14 +148,17 @@ class MaskedData(L.LightningDataModule):
                           batch_size=None)
 
 class CustomIterableDataset(IterableDataset):
-    def __init__(self, data, mask, batch_prop=1.0, batch_dim=None, shuffle_dims=()):
+    def __init__(self, data, mask, batch_prop=1.0, batch_dim=None, shuffle_dims=(), avg_batches: int = 1):
         assert data.shape == mask.shape, f"Data and mask must have the same shape, got {data.shape} and {mask.shape}"
         assert 0 < batch_prop <= 1.0, "batch_prop must be in (0, 1]"
+        if not isinstance(avg_batches, int) or avg_batches < 1:
+            raise ValueError("avg_batches must be an integer >= 1")
         self.data = data
         self.mask = mask
         self.batch_prop = batch_prop
         self.batch_dim = batch_dim
         self.shuffle_dims = shuffle_dims
+        self.avg_batches = avg_batches
 
     def __iter__(self):
         if self.batch_prop < 1.0 and self.batch_dim is None:
@@ -167,7 +176,8 @@ class CustomIterableDataset(IterableDataset):
         if self.batch_dim is None:
             return 1
         else:
-            return self.data.shape[self.batch_dim]
+            n = self.data.shape[self.batch_dim]
+            return (n + self.avg_batches - 1) // self.avg_batches
 
     def __iter1(self):
         """Batch_prop < 1.0, batch_dim is None"""
@@ -193,12 +203,24 @@ class CustomIterableDataset(IterableDataset):
             batch = dist < self.batch_prop
             mask_out = self.mask & batch
 
-            for i in range(self.data.shape[self.batch_dim]):
-                idx = [slice(None) if j != self.batch_dim else i
-                       for j in range(self.data.ndim)]
-                mask_out_2 = mask_out[idx]
-                if mask_out_2.any():
-                    yield self.data[idx], mask_out_2
+            if self.avg_batches == 1:
+                for i in range(self.data.shape[self.batch_dim]):
+                    idx = [slice(None) if j != self.batch_dim else i
+                           for j in range(self.data.ndim)]
+                    mask_out_2 = mask_out[idx]
+                    if mask_out_2.any():
+                        yield self.data[idx], mask_out_2
+            else:
+                num_batches = self.data.shape[self.batch_dim]
+                step = self.avg_batches
+                for start in range(0, num_batches, step):
+                    idx = [slice(None)] * self.data.ndim
+                    idx[self.batch_dim] = slice(start, min(start + step, num_batches))
+                    data_slice = self.data[tuple(idx)]
+                    mask_slice = mask_out[tuple(idx)]
+                    data_avg, mask_avg = self._masked_average(data_slice, mask_slice)
+                    if mask_avg.any():
+                        yield data_avg, mask_avg
 
     def __iter3(self):
         """Batch_prop == 1.0, batch_dim is None"""
@@ -212,12 +234,32 @@ class CustomIterableDataset(IterableDataset):
             for dim in self.shuffle_dims:
                 self.shuffle(dim)
 
-            for i in range(self.data.shape[self.batch_dim]):
-                idx = [slice(None) if j != self.batch_dim else i
-                       for j in range(self.data.ndim)]
-                mask_out = self.mask[idx]
-                if mask_out.any():
-                    yield self.data[idx], mask_out
+            if self.avg_batches == 1:
+                for i in range(self.data.shape[self.batch_dim]):
+                    idx = [slice(None) if j != self.batch_dim else i
+                           for j in range(self.data.ndim)]
+                    mask_out = self.mask[idx]
+                    if mask_out.any():
+                        yield self.data[idx], mask_out
+            else:
+                num_batches = self.data.shape[self.batch_dim]
+                step = self.avg_batches
+                for start in range(0, num_batches, step):
+                    idx = [slice(None)] * self.data.ndim
+                    idx[self.batch_dim] = slice(start, min(start + step, num_batches))
+                    data_slice = self.data[tuple(idx)]
+                    mask_slice = self.mask[tuple(idx)]
+                    data_avg, mask_avg = self._masked_average(data_slice, mask_slice)
+                    if mask_avg.any():
+                        yield data_avg, mask_avg
+
+    def _masked_average(self, X: torch.Tensor, mask: torch.Tensor):
+        # Avoid NaNs from masked-out positions (NaN * 0 = NaN).
+        X_mask = torch.where(mask, X, 0)
+        X_sum = X_mask.sum(dim=self.batch_dim, keepdim=True)
+        counts = mask.sum(dim=self.batch_dim, keepdim=True)
+        return X_sum / counts, counts > 0
+
 
     def shuffle(self, dim: int):
         """Shuffle the data and mask along the specified dimensions."""

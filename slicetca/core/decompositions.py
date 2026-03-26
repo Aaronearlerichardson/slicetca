@@ -30,13 +30,13 @@ def trial_average(X, mask=None, axis=None):
 def explained_variance(X, X_hat, mask=None, axis=None):
     if mask is None:
         mask = torch.ones_like(X, dtype=torch.bool, device=X.device)
-    masked_X = X * mask
-    masked_X_hat = X_hat * mask
+    masked_X = torch.where(mask, X, 0)
+    masked_X_hat = torch.where(mask, X_hat, 0)
     count_non_masked = mask.sum(dim=axis)
     X_centered = X - masked_X.sum(dim=axis) / count_non_masked
     X_hat_centered = X_hat - masked_X_hat.sum(dim=axis) / count_non_masked
-    masked_X_centered = X_centered * mask
-    masked_X_hat_centered = X_hat_centered * mask
+    masked_X_centered = torch.where(mask, X_centered, 0)
+    masked_X_hat_centered = torch.where(mask, X_hat_centered, 0)
     diff = masked_X_centered - masked_X_hat_centered
     out = diff.pow(2).sum(dim=axis) / masked_X_centered.pow(2).sum(dim=axis)
     out[out > 1] = 1 / out[out > 1]
@@ -53,40 +53,37 @@ def error(X, X_hat, mask=None, axis=None):
 
 def is_from_tslearn_metrics(func):
     orig_func = func
-    # from slicetca.run.dtw import SoftDTW
     while isinstance(orig_func, functools.partial):
         orig_func = orig_func.func
-    # if isinstance(orig_func, SoftDTW):
-    #     return True
     return getattr(orig_func, '__module__', '').startswith('tslearn.metrics')
 
 def set_loss(loss_fn, has_mask):
-
+    reduction = getattr(loss_fn, 'reduction', None)
     if is_from_tslearn_metrics(loss_fn):
-        if has_mask: # mask must be consistent accross time
-            loss_calc = functools.partial(loss_fn_dtw_mask,
-                                          loss_fn=loss_fn)
+        # For DTW, training uses manual optimization in training_step; here we keep forward-only aggregator
+        if has_mask:
+            loss_calc = functools.partial(loss_fn_dtw_mask, loss_fn=loss_fn)
         else:
-            loss_calc = functools.partial(loss_fn_no_mask,
-                                          loss_fn=loss_fn)
-    elif loss_fn.reduction == 'none':
+            loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
+    elif reduction == 'none':
         if has_mask:
             loss_calc = functools.partial(loss_fn_with_mask, loss_fn=loss_fn)
         else:
             loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
-    elif loss_fn.reduction == 'sum':
+    elif reduction == 'sum':
         if has_mask:
             loss_calc = functools.partial(loss_fn_sum_with_mask, loss_fn=loss_fn)
         else:
             loss_fn.reduction = 'mean'
             loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
-    elif loss_fn.reduction == 'mean':
+    elif reduction == 'mean':
         if has_mask:
             loss_calc = functools.partial(loss_fn_mean_with_mask, loss_fn=loss_fn)
         else:
             loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
     else:
-        raise ValueError('Invalid reduction method for loss function.')
+        # raise ValueError('Invalid reduction method for loss function.')
+        loss_calc = functools.partial(loss_fn_dtw_mask, loss_fn=loss_fn)
 
     return loss_calc
 
@@ -95,31 +92,12 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     Computes the DTW loss with a mask applied to the input tensors.
     The mask is used to ignore certain elements in the loss calculation.
     """
-    dims = tuple(range(mask.ndim))
-    mask_batch = mask.all(dims[1:])
-    if X.ndim == 2:
-        X_masked = X[mask_batch].reshape(-1, X.shape[-1], 1)
-        X_hat_masked = X_hat[mask_batch].reshape(-1, X_hat.shape[-1], 1)
-    elif X.ndim == 3:
-        new_order = (0, 2, 1)
-        X_masked = X[mask_batch].permute(*new_order)
-        X_hat_masked = X_hat[mask_batch].permute(*new_order)
-    elif X.ndim == 4:
-        new_order = (0, 2, 1)
-        X_masked = X[mask_batch].reshape(-1, X.shape[-2], X.shape[-1]).permute(*new_order)
-        X_hat_masked = X_hat[mask_batch].reshape(-1, X.shape[-2], X.shape[-1]).permute(*new_order)
-    else:
-        raise ValueError("Unsupported number of dimensions for X and X_hat. Expected 2 or 3, got {}".format(X.ndim))
-
-    batch_size = 50
-    batch_loss = 0
-    for i in range(0, X_masked.shape[0], batch_size):
-        X_batch = X_masked[i:i + batch_size]
-        X_hat_batch = X_hat_masked[i:i + batch_size]
-        batch_loss += loss_fn(X_batch, X_hat_batch).sum()
-    batch_loss /= (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
-    return batch_loss
-    # return loss_fn(X_masked, X_hat_masked).sum() / (X_masked.shape[0] * X_masked.shape[1] * X_masked.shape[2])
+    mask_batch = mask.all((-1, -2))
+    X_masked = X[mask_batch].reshape(-1, X.shape[-1], X.shape[-2])
+    X_hat_masked = X_hat[mask_batch].reshape(-1, X_hat.shape[-1], X.shape[-2])
+    # if X_masked.shape[0] == 0:
+    #     return torch.zeros((), device=X.device, dtype=X.dtype)
+    return loss_fn(X_masked, X_hat_masked).sum() / X_masked.shape[0]
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
@@ -244,6 +222,100 @@ class PartitionTCA(pl.LightningModule):
 
         self.set_einsums()
 
+    def __getitem__(self, item):
+        # Normalize index to a tuple of length self.valence with slices/ints
+        if not isinstance(item, tuple):
+            item = (item,)
+        # Expand Ellipsis
+        if any(i is Ellipsis for i in item):
+            ellipsis_pos = item.index(Ellipsis)
+            num_specified = sum(i is not Ellipsis for i in item)
+            num_missing = self.valence - num_specified
+            item = item[:ellipsis_pos] + tuple(slice(None) for _ in range(num_missing)) + item[ellipsis_pos + 1:]
+        # Pad with full slices if too short
+        if len(item) < self.valence:
+            item = item + tuple(slice(None) for _ in range(self.valence - len(item)))
+        if len(item) > self.valence:
+            raise IndexError("Too many indices for tensor model.")
+
+        # Only support ints and slices
+        normalized_indices = []
+        new_dimensions = []
+        kept_axis_old_to_new = {}
+        for axis, idx in enumerate(item):
+            dim_len = self.dimensions[axis]
+            if isinstance(idx, int):
+                # Normalize negative index
+                pos = idx if idx >= 0 else dim_len + idx
+                if pos < 0 or pos >= dim_len:
+                    raise IndexError("Index out of range for axis {}".format(axis))
+                normalized_indices.append(pos)
+            elif isinstance(idx, slice):
+                start, stop, step = idx.indices(dim_len)
+                # Compute resulting length
+                length = len(range(start, stop, step))
+                new_dimensions.append(length)
+                kept_axis_old_to_new[axis] = len(new_dimensions) - 1
+                normalized_indices.append(slice(start, stop, step))
+            else:
+                raise IndexError("Only int, slice, and ellipsis are supported in indexing.")
+
+        # If all axes are integers, return the evaluated scalar/tensor value
+        if len(new_dimensions) == 0:
+            return self.construct()[item]
+
+        # Build new partitions with remapped axis indices; drop removed axes
+        new_partitions = []
+        for part in self.partitions:
+            new_part = []
+            for block_axes in part:
+                remapped = []
+                for old_ax in block_axes:
+                    if old_ax in kept_axis_old_to_new:
+                        remapped.append(kept_axis_old_to_new[old_ax])
+                new_part.append(remapped)
+            new_partitions.append(new_part)
+
+        # Slice component tensors per partition/block
+        sliced_components = []
+        for p_idx, part in enumerate(self.partitions):
+            part_components = []
+            for b_idx, block_axes in enumerate(part):
+                # Build index for this parameter: first dim is rank, then per-axis
+                param = self.vectors[p_idx][b_idx].detach()
+                index_tuple = [slice(None)]  # keep all ranks
+                for old_ax in block_axes:
+                    idx = normalized_indices[old_ax]
+                    index_tuple.append(idx)
+                param_sliced = param[tuple(index_tuple)]
+                part_components.append(param_sliced)
+            sliced_components.append(part_components)
+
+        # Instantiate a new PartitionTCA with updated structure
+        new_model = PartitionTCA(
+            dimensions=new_dimensions,
+            partitions=new_partitions,
+            ranks=[int(r.item()) if isinstance(r, torch.Tensor) else int(r) for r in self.ranks],
+            positive=self.positive,
+            initialization=self.initialization,
+            lr=self._lr,
+            weight_decay=self._weight_decay,
+            init_weight=self.init_weight,
+            init_bias=self.init_bias,
+            dtype=self.dtype,
+            loss=self.loss,
+            threshold=self._threshold,
+            patience=self._patience,
+        )
+
+        # Keep device consistent with the original model
+        new_model.to(self.device)
+
+        # Load sliced parameter values into the new model
+        new_model.set_components(sliced_components)
+
+        return new_model
+
     def identity(self, x):
         return x
 
@@ -350,23 +422,22 @@ class PartitionTCA(pl.LightningModule):
 
         for i in range(len(self.vectors)):
             for j in range(len(self.vectors[i])):
+                value = self.positive_function(self.vectors[i][j]).data
                 if numpy:
-                    # if self.vectors[i][j].itemsize == 2:
-                    #     temp[i].append(self.positive_function(self.vectors[i][j]).data.to(torch.float16).detach().cpu().numpy())
-                    # else:
-                    temp[i].append( self.positive_function(self.vectors[i][j]).data.detach().cpu().numpy())
+                    temp[i].append(value.detach().cpu().numpy())
+                elif not detach:
+                    temp[i].append(value.detach())
                 else:
-                    if not detach: temp[i].append(self.positive_function(self.vectors[i][j]).data.detach())
-                    else: temp[i].append(self.positive_function(self.vectors[i][j]).data)
+                    temp[i].append(value)
 
         return temp
 
     def set_components(self, components: Sequence[Sequence[torch.Tensor]]):  # bug if positive_function != abs
         """
-        Set the model's components. 
-        If the positive functions are abs or the identity model.set_components(model.get_components) 
+        Set the model's components.
+        If the positive functions are abs or the identity model.set_components(model.get_components)
         has no effect besides resetting the gradient.
-        
+
         :param components: list of list tensors.
         """
 
@@ -379,28 +450,33 @@ class PartitionTCA(pl.LightningModule):
                         self.vectors[i][j].copy_(torch.tensor(components[i][j], device=self.device))
         self.zero_grad()
 
-    def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
+    def _batch_loss(self, batch: Any) -> torch.Tensor:
         X, mask = batch
-        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
-        self.log_dict({"train_loss": loss}, prog_bar=True, logger=True,
-                      add_dataloader_idx=False, sync_dist=True)
+        return self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
+
+    def _log_step_loss(self, stage: str, loss: torch.Tensor, prog_bar: bool):
+        self.log_dict(
+            {f"{stage}_loss": loss},
+            prog_bar=prog_bar,
+            logger=True,
+            add_dataloader_idx=False,
+            sync_dist=True,
+        )
+
+    def training_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
+        loss = self._batch_loss(batch)
+        self._log_step_loss("train", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
-        X, mask = batch
-        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
-        to_log = {"val_loss": loss}
-        self.log_dict(to_log, prog_bar=True, logger=True,
-                      add_dataloader_idx=False, sync_dist=True)
+        loss = self._batch_loss(batch)
+        self._log_step_loss("val", loss, prog_bar=True)
         self.losses.append(loss.item())
         return loss
 
     def test_step(self, batch: Any, batch_idx: int) -> STEP_OUTPUT:
-        X, mask = batch
-        loss = self._loss_calc(X.squeeze(), self.construct(), mask.squeeze())
-        to_log = {"test_loss": loss}
-        self.log_dict(to_log, prog_bar=False, logger=True,
-                      add_dataloader_idx=False, sync_dist=True)
+        loss = self._batch_loss(batch)
+        self._log_step_loss("test", loss, prog_bar=False)
         return loss
 
     def configure_optimizers(self):
@@ -412,46 +488,25 @@ class PartitionTCA(pl.LightningModule):
         elif issubclass(type(self._weight_decay), torch.optim.Optimizer):
             optimizer = type(self._weight_decay)(self.parameters(), self._lr)
         else:
-            optimizer = torch.optim.AdamW(self.parameters(), self._lr, eps=eps,
-                                                # momentum=0.9, centered=True,
-                                          weight_decay=self._weight_decay)
+            optimizer = torch.optim.AdamW(self.parameters(), self._lr, eps=eps, weight_decay=self._weight_decay)
         if self._threshold is None:
             return optimizer
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5,
             patience=self._patience, threshold=self._threshold)
-        # lr_scheduler = CosineWarmupScheduler(optimizer, self._patience,
-        #                                      self.trainer.max_epochs)
-        # lr_scheduler = torch.optim.swa_utils.SWALR(
-        #     optimizer, anneal_strategy = "cos",
-        #     anneal_epochs = self._patience, swa_lr = self._threshold)
+        # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=1000, eta_min=self._lr * 0.1
+        # )
         lr_scheduler_config = {
-            # REQUIRED: The scheduler instance
             "scheduler": lr_scheduler,
-            # The unit of the scheduler's step size, could also be 'step'.
-            # 'epoch' updates the scheduler on epoch end whereas 'step'
-            # updates it after a optimizer update.
             "interval": 'epoch',
-            # How many epochs/steps should pass between calls to
-            # `scheduler.step()`. 1 corresponds to updating the learning
-            # rate after every epoch/step.
             "frequency": 1,
-            # Metric to to monitor for schedulers like `ReduceLROnPlateau`
             "monitor": "val_loss",
-            # If set to `True`, will enforce that the value specified 'monitor'
-            # is available when the scheduler is updated, thus stopping
-            # training if not found. If set to `False`, it will only produce a warning
             "strict": True,
-            # If using the `LearningRateMonitor` callback to monitor the
-            # learning rate progress, this keyword can be used to specify
-            # a custom logged name
             "name": "learning_rate",
         }
         super().configure_optimizers()
-        return {
-                "optimizer": optimizer,
-                "lr_scheduler": lr_scheduler_config,
-                }
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
 
     def copy(self):
         """
@@ -474,8 +529,8 @@ class PartitionTCA(pl.LightningModule):
 class SliceTCA(PartitionTCA):
     def __init__(self, 
                  dimensions: Sequence[int], 
-                 ranks: Sequence[int], 
-                 positive: bool = False, 
+                 ranks: Sequence[int],
+                 positive: bool = False,
                  initialization: str = 'uniform',
                  lr: float = 5 * 10 ** -3,
                  weight_decay: float = None,

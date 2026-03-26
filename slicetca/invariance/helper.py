@@ -37,15 +37,38 @@ def outer_formula(*tensors: torch.Tensor):
     current_index = 105  # ASCII for 'i'
 
     for tensor in tensors:
-        indices = [chr(current_index + i) for i in range(len(tensor.size()))]
+        indices = [chr(current_index + i + 1)
+                   for i in range(len(tensor.size()) - 1)]
         indices_list.append(''.join(indices))
         current_index += len(tensor.size())
 
-    input_indices = ','.join(indices_list)
-    output_indices = ''.join(indices_list)
+    input_indices = ','.join([chr(105) + ind for ind in indices_list])
+    output_indices = chr(105) + ''.join(indices_list)
     formula = f"{input_indices}->{output_indices}"
 
     return formula
+
+def inner_formula(*tensors, axis: int = 0):
+    """
+    Generates an einsum formula for the inner product of any number of input tensors.
+
+    :param tensors: A sequence of input tensors.
+    :return: A string representing the einsum formula for the inner product.
+    """
+    indices_list = []
+    current_index = 105  # ASCII for 'i'
+
+    for tensor in tensors:
+        indices = [chr(current_index + i) for i in range(tensor.ndim)]
+        indices_list.append(''.join(indices))
+        current_index += tensor.ndim
+
+    input_indices = ','.join(indices_list)
+    output_indices = ''.join(indices_list[:axis] + indices_list[axis+1:])
+    formula = f"{input_indices}->{output_indices}"
+
+    return formula
+
 
 def construct_per_type(model: SliceTCA, components: Sequence[Sequence[torch.Tensor]]):
     """
@@ -53,13 +76,15 @@ def construct_per_type(model: SliceTCA, components: Sequence[Sequence[torch.Tens
     :param components: The components to construct.
     :return: Reconstructed tensor.
     """
-
-    temp = [torch.zeros(model.dimensions).to(model.device) for i in range(len(components))]
-
+    out = []
     for i in range(len(components)):
-        for j in range(model.ranks[i]):
-            temp[i] += construct_single_component(model, components, i, j)
-    return temp
+        if components[i]:
+            temp = torch.zeros(model.dimensions, dtype=model.dtype,
+                        device=model.device)
+            for j in range(model.ranks[i]):
+                temp += construct_single_component(model, components, i, j)
+            out.append(temp)
+    return out
 
 
 def construct_per_component(model: SliceTCA, components: Sequence[Sequence[torch.Tensor]], ignore: tuple = ()):
