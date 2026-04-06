@@ -1501,8 +1501,11 @@ def gamma_soft_dtw_nested(
     """
     if dataset.dim() == 2:
         dataset = dataset.unsqueeze(0)
+    if dataset.dim() > 3:
+        # Flatten leading dimensions into batch: (..., N, D) -> (B, N, D)
+        dataset = dataset.reshape(-1, dataset.shape[-2], dataset.shape[-1])
     if dataset.dim() != 3:
-        raise ValueError(f"Expected (B,N,D) or (N,D), got {tuple(dataset.shape)}")
+        raise ValueError(f"Expected (...,N,D) or (N,D), got {tuple(dataset.shape)}")
     B, N, D = dataset.shape
     data_np = dataset.detach().cpu().float().numpy()
 
@@ -1768,7 +1771,7 @@ def _warmup_cuda_kernels_for_tests():
     torch.cuda.synchronize()
 
 
-def test_cuda_outer_symmetric2_scales_as_2n():
+def cuda_outer_symmetric2_scales_as_2n():
     """
     softdtw_forward_cuda with symmetric2: forward value ~= 2N*c.
     """
@@ -1790,7 +1793,7 @@ def test_cuda_outer_symmetric2_scales_as_2n():
         )
 
 
-def test_cuda_2d_symmetric2_scales_as_2n():
+def cuda_2d_symmetric2_scales_as_2n():
     """
     softdtw_2d_forward_precomp_cuda: forward value ~= 2N*c (same as 1D).
     """
@@ -1812,7 +1815,7 @@ def test_cuda_2d_symmetric2_scales_as_2n():
         )
 
 
-def test_cuda_1d_2d_match():
+def cuda_1d_2d_match():
     """
     CUDA 1D and 2D kernels give the same result (both symmetric2).
     """
@@ -1835,7 +1838,7 @@ def test_cuda_1d_2d_match():
         )
 
 
-def test_cuda_inner_symmetric2_scales_as_2d():
+def cuda_inner_symmetric2_scales_as_2d():
     """
     _nested_inner_forward_cuda uses symmetric2.  For X=zeros, Y=sqrt(c)*ones
     of shape (B, N, D), every inner-DTW cell cost is c, so the result for
@@ -1874,10 +1877,10 @@ def run_cuda_diagonal_downweighting_tests():
     print("Running CUDA symmetric2 tests...")
     _warmup_cuda_kernels_for_tests()
     tests = [
-        test_cuda_outer_symmetric2_scales_as_2n,
-        test_cuda_2d_symmetric2_scales_as_2n,
-        test_cuda_1d_2d_match,
-        test_cuda_inner_symmetric2_scales_as_2d,
+        cuda_outer_symmetric2_scales_as_2n,
+        cuda_2d_symmetric2_scales_as_2n,
+        cuda_1d_2d_match,
+        cuda_inner_symmetric2_scales_as_2d,
     ]
     for t in tests:
         t()

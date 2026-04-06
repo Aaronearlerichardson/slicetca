@@ -93,8 +93,8 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     The mask is used to ignore certain elements in the loss calculation.
     """
     mask_batch = mask.all((-1, -2))
-    X_masked = X[mask_batch].reshape(-1, X.shape[-1], X.shape[-2])
-    X_hat_masked = X_hat[mask_batch].reshape(-1, X_hat.shape[-1], X.shape[-2])
+    X_masked = X[mask_batch].transpose(-1, -2)
+    X_hat_masked = X_hat[mask_batch].transpose(-1, -2)
     # if X_masked.shape[0] == 0:
     #     return torch.zeros((), device=X.device, dtype=X.dtype)
     return loss_fn(X_masked, X_hat_masked).sum() / X_masked.shape[0]
