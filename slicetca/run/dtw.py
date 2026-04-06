@@ -1521,10 +1521,9 @@ def gamma_soft_dtw_nested(
     sq_dists = (diffs ** 2).sum(axis=-1)                  # (n, n)
     triu_idx = np.triu_indices(sq_dists.shape[0], k=1)
     median_sq_dist = float(np.median(sq_dists[triu_idx]))
-    # gamma_freq ≈ median squared Euclidean distance between frequency profiles.
-    # This gives moderate softness: the softmin entropy bonus is comparable to
-    # the per-cell cost differences.
-    gamma_freq = max(median_sq_dist, 1e-4)
+    # Adapted from tslearn's sigma * sqrt(seq_len) heuristic.
+    # The inner DTW operates on sequences of length D.
+    gamma_freq = max(median_sq_dist * np.sqrt(D), 1e-4)
 
     # ---- Step 2: gamma_time from sampled inner-DTW costs ----
     # The outer DTW operates on inner-DTW costs, which are much larger than
@@ -1546,6 +1545,8 @@ def gamma_soft_dtw_nested(
 
     c_np = c_vals.detach().cpu().float().numpy()
     median_cost = float(np.median(np.abs(c_np)))
+    # Inner DTW costs already scale with D (longer freq profiles → larger cost),
+    # so no extra sqrt(N) scaling is needed here.
     gamma_time = max(median_cost, 1e-4)
 
     return float(gamma_time), float(gamma_freq)

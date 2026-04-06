@@ -64,7 +64,7 @@ def set_loss(loss_fn, has_mask):
         if has_mask:
             loss_calc = functools.partial(loss_fn_dtw_mask, loss_fn=loss_fn)
         else:
-            loss_calc = functools.partial(loss_fn_no_mask, loss_fn=loss_fn)
+            loss_calc = functools.partial(loss_fn_dtw_no_mask, loss_fn=loss_fn)
     elif reduction == 'none':
         if has_mask:
             loss_calc = functools.partial(loss_fn_with_mask, loss_fn=loss_fn)
@@ -98,6 +98,15 @@ def loss_fn_dtw_mask(X, X_hat, mask, loss_fn):
     # if X_masked.shape[0] == 0:
     #     return torch.zeros((), device=X.device, dtype=X.dtype)
     return loss_fn(X_masked, X_hat_masked).sum() / X_masked.shape[0]
+
+def loss_fn_dtw_no_mask(X, X_hat, mask, loss_fn):
+    """
+    DTW loss without masking.  Transposes the last two dims so that
+    (…, freq, time) becomes (B, time, freq) for SoftDTWNested.
+    """
+    X_t = X.transpose(-1, -2).contiguous().view(-1, X.shape[-1], X.shape[-2])
+    X_hat_t = X_hat.transpose(-1, -2).contiguous().view(-1, X_hat.shape[-1], X_hat.shape[-2])
+    return loss_fn(X_t, X_hat_t).mean()
 
 def loss_fn_with_mask(X, X_hat, mask, loss_fn):
     X_mask = torch.where(mask, X, 0)
