@@ -15,7 +15,7 @@ from slicetca.run.data import BatchedData, MaskedData
 
 
 def decompose(
-    data: Union[torch.Tensor, np.array],
+    data: Union[torch.Tensor, np.ndarray],
     number_components: Union[Sequence[int], int],
     positive: bool = False,
     initialization: str = "uniform",
@@ -33,6 +33,7 @@ def decompose(
     weight_decay: float = None,
     batch_prop_decay: int = 1,
     batch_prop: float = 1.0,
+    lr_decay: float = None,
     init_bias: float = 0.0,
     loss_function: callable = None,
     device: str = None,
@@ -121,11 +122,14 @@ def decompose(
             torch.cuda.empty_cache()
         trainer.fit(model, datamodule=inputs)
 
+        if lr_decay is not None:
+            model._lr *= lr_decay
+
     model.to("cpu")
     return model.get_components(numpy=True), model
 
 
-def _ensure_tensor(data: Union[torch.Tensor, np.array]) -> torch.Tensor:
+def _ensure_tensor(data: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
     if isinstance(data, np.ndarray):
         return torch.tensor(data)
     if isinstance(data, torch.Tensor):
