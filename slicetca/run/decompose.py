@@ -43,6 +43,7 @@ def decompose(
     dtype: torch.dtype = None,
     testing: bool = False,
     blocklength: int = 10,
+    n_folds: int = 5,
     **kwargs,
 ) -> (list, Union[SliceTCA, TCA]):
     """
@@ -89,6 +90,7 @@ def decompose(
         testing=testing,
         blocklength=blocklength,
         avg_batches=avg_batches,
+        n_folds=n_folds,
     )
 
     for i in range(1, batch_prop_decay + 1):
@@ -158,11 +160,12 @@ def _build_inputs(
     testing: bool,
     blocklength: int,
     avg_batches: int,
+    n_folds: int,
 ):
     if batch_dim is None:
-        inputs = MaskedData(data, mask, 5, batch_prop, shuffle_dim, testing, blocklength)
+        inputs = MaskedData(data, mask, n_folds, batch_prop, shuffle_dim, testing, blocklength)
         return 1, inputs
-    inputs = BatchedData(data, batch_dim, shuffle_dim, mask, 5, batch_prop, testing, avg_batches=avg_batches)
+    inputs = BatchedData(data, batch_dim, shuffle_dim, mask, n_folds, batch_prop, testing, avg_batches=avg_batches)
     return 1.0, inputs
 
 
