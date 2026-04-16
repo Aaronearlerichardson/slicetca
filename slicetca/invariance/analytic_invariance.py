@@ -44,3 +44,63 @@ def svd_basis(model, **kwargs):
     model.set_components(new_components)
 
     return model
+
+def svd_basis_per_component(model, **kwargs):
+    """
+    Sets the vectors of each component to an orthonormal basis within each slice type.
+
+    :param model: SliceTCA model
+    :param kwargs: ignored
+    :return: model with new components.
+    """
+    device = model.device
+    ranks = model.ranks
+
+    new_components = [[None, None] for i in range(len(model.vectors))]
+
+    for i in range(len(ranks)):
+        if ranks[i] != 0:
+            new = [[], []]
+            for j in range(ranks[i]):
+                constructed = model.construct_single_component(i, j)
+                flattened_constructed = constructed.reshape(model.dimensions[i], -1).transpose(0, 1)
+
+                U, S, V = torch.linalg.svd(flattened_constructed.detach().cpu(), full_matrices=False)
+                n = int(ranks[i] * (j + 1))
+                U, S, V = U[:, :n], S[:n], V[:n]
+                U, S, V = U.to(device), S.to(device), V.to(device)
+
+                new[0].append(V)
+                if len(ranks) == len(model.dimensions):
+                    US = (U @ torch.diag(S))
+                    slice = US.transpose(0, 1).reshape(
+                        [ranks[i]] + [model.dimensions[q] for q in
+                                      range(len(ranks)) if
+                                      q != i])
+                    new[1].append(slice)
+                else:
+                    new[1].append((U @ torch.diag(S)).transpose(0, 1))
+            new_components[i][0] = torch.stack(new[0], dim=0)
+            if len(ranks) == len(model.dimensions):
+                new_components[i][1] = torch.stack(new[1], dim=0).reshape(
+                    [ranks[i]] + [model.dimensions[q] for q in
+                                  range(len(ranks)) if
+                                  q != i])
+            else:
+                new_components[i][1] = torch.stack(new[1], dim=0).transpose(0, 1)
+        else:
+            new_components[i][0] = torch.zeros_like(model.vectors[i][0])
+            new_components[i][1] = torch.zeros_like(model.vectors[i][1])
+    model.set_components(new_components)
+    return model
+
+
+def slice_vector_clustering(model, **kwargs):
+    """Penalizes the correlation of the reconstructed slices across all components.
+
+
+    :param model:
+    :param kwargs:
+    :return:
+    """
+

@@ -20,7 +20,7 @@ def orthogonality_component_type_wise(reconstructed_tensors_of_each_partition: S
     return l + l2(reconstructed_tensors_of_each_partition)
 
 
-def orthogonality_along_dim(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor], dim: int = -1):
+def orthogonality_along_dim(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor], dim: tuple | int = (-1,)):
     """
     Penalizes non-orthogonality between the reconstructed tensors of each partition/slicing.
 
@@ -28,9 +28,14 @@ def orthogonality_along_dim(reconstructed_tensors_of_each_partition: Sequence[to
     :return: Torch float.
     """
 
+    if isinstance(dim, int):
+        dim = (dim,)
     l = 0
     for combo in combinations(reconstructed_tensors_of_each_partition, 2):
-        l += torch.nn.CosineSimilarity(dim=dim)(combo[0], combo[1]).mean()
+        temp = torch.ones_like(combo[0])
+        for d in dim:
+            temp *= torch.nn.CosineSimilarity(dim=d)(combo[0], combo[1]).unsqueeze(d)
+        l += temp.mean()
     return l
 
 
@@ -97,7 +102,7 @@ try:
         parts = [p.permute(0,2,1) for p in reconstructed_tensors_of_each_partition]
         l = 0
         for combo in combinations(parts, 2):
-            l += SoftDTWLossPyTorch(normalize=True, gamma=1)(combo[0], combo[1])
+            l += SoftDTWLossPyTorch(normalize=True, gamma=.1)(combo[0], combo[1])
         return l
 
 except ImportError:
