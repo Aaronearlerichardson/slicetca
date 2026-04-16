@@ -70,6 +70,7 @@ def sgd_invariance(model: SliceTCA,
             break
 
     model.set_components(transformation(components))
+    model.requires_grad_()
 
     return model
 
