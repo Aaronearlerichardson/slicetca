@@ -1,18 +1,23 @@
 from slicetca.invariance.iterative_invariance import sgd_invariance, within_invariance
-from slicetca.invariance.analytic_invariance import svd_basis
+from slicetca.invariance.analytic_invariance import svd_basis, svd_basis_per_component
 from slicetca.invariance.criteria import *
 from slicetca.core.decompositions import SliceTCA
+from functools import partial
 
 dict_L2_invariance_objectives = {'orthogonality': orthogonality_component_type_wise,
                                  'L2': l2,
                                  'peaks': peak_coincidence,
+                                 'orthogonality_along_dim': orthogonality_along_dim,
                                  'dtw': dtw,
                                  'soft_dtw': soft_dtw,
                                  'skewness': skewness}
 
 dict_L3_invariance_functions = {'svd': svd_basis,
-                                'orthogonality': model_ortho,
-                                'skewness': skewness}
+                                'svd_per_component': svd_basis_per_component,
+                                'orthogonality':
+                                    partial(
+                                        within_invariance,
+                                        objective_function=orthogonality_along_dim)}
 
 
 def invariance(model: SliceTCA,
@@ -35,6 +40,6 @@ def invariance(model: SliceTCA,
     elif L2 is not None:
         model = within_invariance(model, objective_function=dict_L2_invariance_objectives[L2], **kwargs)
     if L3 is not None:
-        model = dict_L3_invariance_functions[L3](model)
+        model = dict_L3_invariance_functions[L3](model, **kwargs)
 
     return model
