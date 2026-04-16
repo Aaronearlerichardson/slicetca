@@ -40,6 +40,7 @@ def decompose(
     verbose: int = 0,
     compile: bool = False,
     regularization: str = None,
+    regularization_L3: str = None,
     dtype: torch.dtype = None,
     testing: bool = False,
     blocklength: int = 10,
@@ -96,9 +97,10 @@ def decompose(
     for i in range(1, batch_prop_decay + 1):
         callbacks = _build_callbacks(min_std=min_std, min_iter=min_iter)
 
-        if regularization is not None:
+        if regularization is not None or regularization_L3 is not None:
             model.to(device)
-            invariance(model, L2=regularization, L3=None, max_iter=1000, iter_std=10)
+            invariance(model, L2=regularization, L3=regularization_L3,
+                       max_iter=1000, iter_std=10)
             model.to("cpu")
 
         trainer = _build_trainer(

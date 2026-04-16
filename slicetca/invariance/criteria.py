@@ -54,6 +54,25 @@ def l2(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor]):
     return l
 
 
+def l2_orthogonality_along_dim(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor],
+                                dim: tuple | int = (-1,), alpha: float = 1.0):
+    """
+    Combined L2 + orthogonality_along_dim objective.
+
+    Simultaneously minimizes the L2 norm of each component and penalizes
+    cosine similarity between components along the specified dimension(s).
+    The alpha parameter controls the relative weight of the orthogonality term.
+
+    :param reconstructed_tensors_of_each_partition: The sum of the terms of a given partition/slicing.
+    :param dim: Dimension(s) along which to penalize cosine similarity.
+    :param alpha: Weight of the orthogonality term relative to L2.
+    :return: Torch float.
+    """
+    return l2(reconstructed_tensors_of_each_partition) + alpha * orthogonality_along_dim(
+        reconstructed_tensors_of_each_partition, dim=dim
+    )
+
+
 def peak_coincidence(reconstructed_tensors_of_each_partition: Sequence[torch.Tensor], axis: int = -1):
     """
     Penalizes coincidence of peaks between the reconstructed tensors of each partition/slicing.

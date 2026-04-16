@@ -8,6 +8,7 @@ dict_L2_invariance_objectives = {'orthogonality': orthogonality_component_type_w
                                  'L2': l2,
                                  'peaks': peak_coincidence,
                                  'orthogonality_along_dim': orthogonality_along_dim,
+                                 'l2_orthogonality_along_dim': l2_orthogonality_along_dim,
                                  'dtw': dtw,
                                  'soft_dtw': soft_dtw,
                                  'skewness': skewness}
