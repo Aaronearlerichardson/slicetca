@@ -1,12 +1,12 @@
 from slicetca.invariance.helper import *
 
 from itertools import combinations
-import torch
+import lightning as L
 import torch.nn as nn
 import numpy as np
 
 
-class TransformationBetween(nn.Module):
+class TransformationBetween(L.LightningModule):
     """
     Transformation between sliceTCA component types.
     """
@@ -18,7 +18,7 @@ class TransformationBetween(nn.Module):
         self.ranks = model.ranks
         self.partitions = model.partitions
         self.dims = model.dimensions
-        self.device = model.device
+        # self.device = model.device
 
         self.free_vectors_combinations = nn.ModuleList(
             [nn.ParameterList([nn.Parameter(torch.tensor(0.0, device=self.device)) for j in range(self.number_components)]) for i in
@@ -30,6 +30,7 @@ class TransformationBetween(nn.Module):
                                              range(self.number_components)]
         self.remaining_dims_combinations = [[None for j in range(self.number_components)] for i in
                                             range(self.number_components)]
+        self.to(model.device)
 
         for combination in combinations(list(range(self.number_components)), 2):
             if self.ranks[combination[0]] != 0 and self.ranks[combination[1]] != 0:
@@ -76,7 +77,7 @@ class TransformationBetween(nn.Module):
         return components
 
 
-class TransformationWithin(nn.Module):
+class TransformationWithin(L.LightningModule):
     """
     Transformation within sliceTCA component types.
     """
@@ -86,11 +87,12 @@ class TransformationWithin(nn.Module):
 
         self.ranks = model.ranks
         self.number_components = len(model.ranks)
-        self.device = model.device
+        # self.device = model.device
         dtype = model.vectors[0][0].dtype
 
         self.free_gl = nn.ParameterList([nn.Parameter(torch.eye(i, device=self.device, dtype=dtype)+torch.randn((i,i),
                                                     device=self.device, dtype=dtype)/np.sqrt(3*i)) for i in self.ranks])
+        self.to(model.device)
 
     def forward(self, components):
 
@@ -114,20 +116,20 @@ if __name__ == "__main__":
     from slicetca.invariance.analytic_invariance import svd_basis
     from slicetca.invariance.helper import construct_per_type, construct_per_component
 
-    model = TCA([10, 10, 10], 5, positive=True,
+    model = SliceTCA([10, 10, 10], [5, 1, 0], positive=True,
                      initialization="uniform-positive", dtype=torch.float64)
     model.to('cuda')
     # model = svd_basis(model)
     components = model.get_components()
 
-    # transformation_between = TransformationBetween(model)
+    transformation_between = TransformationBetween(model)
     transformation_within = TransformationWithin(model)
 
-    # components = transformation_between(components)
-    components = transformation_within(components)
+    components = transformation_between(components)
+    # components = transformation_within(components)
 
-    # reconstructed = construct_per_type(model, components)
-    reconstructed = construct_per_component(model, components)
+    reconstructed = construct_per_type(model, components)
+    # reconstructed = construct_per_component(model, components)
 
     out = model()
     print(reconstructed)
