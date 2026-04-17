@@ -1455,11 +1455,14 @@ class SoftDTWNested(pl.LightningModule):
         args = (self.gamma_time, self.gamma_freq, self.bw_time, self.bw_freq)
 
         if self.normalize:
-            B = bx
-            x_cat = torch.cat([x, x, y], dim=0)
-            y_cat = torch.cat([y, x, y], dim=0)
-            out = _NestedSoftDTWFunction.apply(x_cat, y_cat, *args)
-            out_xy, out_xx, out_yy = out.split(B, dim=0)
+            # B = bx
+            # x_cat = torch.cat([x, x, y], dim=0)
+            # y_cat = torch.cat([y, x, y], dim=0)
+            # out = _NestedSoftDTWFunction.apply(x_cat, y_cat, *args)
+            # out_xy, out_xx, out_yy = out.split(B, dim=0)
+            out_xy = _NestedSoftDTWFunction.apply(x, y, *args)
+            out_xx = _NestedSoftDTWFunction.apply(x, x, *args)
+            out_yy = _NestedSoftDTWFunction.apply(y, y, *args)
             return out_xy - 0.5 * (out_xx + out_yy)
 
         return _NestedSoftDTWFunction.apply(x, y, *args)
