@@ -501,7 +501,7 @@ class PartitionTCA(pl.LightningModule):
         if self._threshold is None:
             return optimizer
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5,
+            optimizer, mode='min', factor=0.1,
             patience=self._patience, threshold=self._threshold)
         # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         #     optimizer, T_max=1000, eta_min=self._lr * 0.1

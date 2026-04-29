@@ -205,8 +205,8 @@ class CustomIterableDataset(IterableDataset):
 
             if self.avg_batches == 1:
                 for i in range(self.data.shape[self.batch_dim]):
-                    idx = [slice(None) if j != self.batch_dim else i
-                           for j in range(self.data.ndim)]
+                    idx = tuple(slice(None) if j != self.batch_dim else i
+                           for j in range(self.data.ndim))
                     mask_out_2 = mask_out[idx]
                     if mask_out_2.any():
                         yield self.data[idx], mask_out_2
@@ -236,8 +236,8 @@ class CustomIterableDataset(IterableDataset):
 
             if self.avg_batches == 1:
                 for i in range(self.data.shape[self.batch_dim]):
-                    idx = [slice(None) if j != self.batch_dim else i
-                           for j in range(self.data.ndim)]
+                    idx = tuple(slice(None) if j != self.batch_dim else i
+                           for j in range(self.data.ndim))
                     mask_out = self.mask[idx]
                     if mask_out.any():
                         yield self.data[idx], mask_out
@@ -262,16 +262,41 @@ class CustomIterableDataset(IterableDataset):
 
 
     def shuffle(self, dim: int):
-        """Shuffle the data and mask along the specified dimensions."""
-        shuffle_slice = [slice(None)] * self.data.ndim
-        perms = mult(self.data.shape[self.batch_dim],
-                     (self.data.shape[dim], self.data.shape[self.batch_dim]))
-        for i in range(self.data.shape[dim]):
-            shuffle_slice[dim] = i
-            perm_slice = shuffle_slice.copy()
-            perm_slice[self.batch_dim] = perms[i]
-            self.data[tuple(shuffle_slice)] = self.data[tuple(perm_slice)]
-            self.mask[tuple(shuffle_slice)] = self.mask[tuple(perm_slice)]
+        """Shuffle the data and mask along ``batch_dim`` (with replacement),
+        independently for every slice of ``dim``.
+
+        Vectorised: collapses the per-slice Python for-loop into a single
+        ``torch.gather`` call, replacing ``shape[dim]`` CUDA kernel launches
+        with one.
+
+        Reproducibility: index generation still goes through :func:`mult`
+        (uniform multinomial with replacement), so given a fixed
+        ``torch.manual_seed`` the random draws are identical to the previous
+        loop-based implementation — and therefore so is the resulting
+        permutation. The only thing that changes is *how* the indices are
+        applied (one fused gather vs. ``shape[dim]`` slice assignments).
+        """
+        n_dim = self.data.shape[dim]
+        n_batch = self.data.shape[self.batch_dim]
+
+        # (n_dim, n_batch) integer index tensor — same draw as the old loop.
+        perms = mult(n_batch, (n_dim, n_batch))
+        if perms.device != self.data.device:
+            perms = perms.to(self.data.device, non_blocking=True)
+
+        # Broadcast (n_dim, n_batch) → data.shape: 1 on every axis except
+        # ``dim`` and ``batch_dim``, then expand_as for a strided view.
+        perms_shape = [1] * self.data.ndim
+        perms_shape[dim] = n_dim
+        perms_shape[self.batch_dim] = n_batch
+        perms_view = perms.reshape(perms_shape).expand_as(self.data)
+
+        # One gather per tensor; both reads are from the pre-shuffle state,
+        # matching the original loop's read-before-write semantics (each
+        # iteration touched a distinct slice of ``dim``, so there was no
+        # cross-iteration dependency).
+        self.data = torch.gather(self.data, self.batch_dim, perms_view)
+        self.mask = torch.gather(self.mask, self.batch_dim, perms_view)
 
 def handle_data(data, mask=None):
     if mask is None:
